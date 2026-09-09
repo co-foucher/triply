@@ -327,7 +327,7 @@ def render_extract_results_section(stl_dir: str, file_name: str) -> None:
     else:
         st.error(f"No export defined for this simulation type: {st.session_state['sim_config']['load_case']}. Please run a simulation with a load case first.")
 
-if st.session_state.get("sim_output_dir") is not None:
+if st.session_state.get("sim_output_dir") is not None or True:
     render_extract_results_section(stl_dir, file_name)
 else:
     st.info("Run a simulation first to extract results from the ODB file.")

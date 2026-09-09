@@ -1,6 +1,6 @@
 1
 
-   Abaqus 2024                                  Date 04-Sep-2026   Time 16:56:06
+   Abaqus 2024                                  Date 08-Sep-2026   Time 16:52:46
    For use by EMPA EIDGENOESSISCHE MATERIALPRUEFUNGS_UND FORSCHUNGSANSTALT under license from Dassault Systemes or its subsidiary.
 
                                                                                  
@@ -104,12 +104,12 @@
 
 
  AVERAGE FORCE                      1.051E-02   TIME AVG. FORCE       1.051E-02
- LARGEST SCALED RESIDUAL FORCE      1.158E-13   AT NODE      89919   DOF  3
+ LARGEST SCALED RESIDUAL FORCE      1.096E-13   AT NODE      72415   DOF  3
    INSTANCE: PART-1-1                                                                        
-  CORRESPONDING RESIDUAL FORCE      1.158E-13
- LARGEST INCREMENT OF DISP.        -1.213E-03   AT NODE      88030   DOF  3
+  CORRESPONDING RESIDUAL FORCE      1.096E-13
+ LARGEST INCREMENT OF DISP.        -4.042E-04   AT NODE      88030   DOF  3
    INSTANCE: PART-1-1                                                                        
- LARGEST CORRECTION TO DISP.       -1.213E-03   AT NODE      88030   DOF  3
+ LARGEST CORRECTION TO DISP.       -4.042E-04   AT NODE      88030   DOF  3
    INSTANCE: PART-1-1                                                                        
           THE FORCE     EQUILIBRIUM RESPONSE WAS LINEAR IN THIS INCREMENT
 
@@ -143,8 +143,8 @@
 
 
      JOB TIME SUMMARY
-       USER TIME (SEC)      =      9.6    
-       SYSTEM TIME (SEC)    =      2.3    
+       USER TIME (SEC)      =      9.9    
+       SYSTEM TIME (SEC)    =      2.4    
        TOTAL CPU TIME (SEC) =      12.    
-       WALLCLOCK TIME (SEC) =           17
+       WALLCLOCK TIME (SEC) =           18
        MEMORY PEAK (GB)     =            0

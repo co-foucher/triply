@@ -105,6 +105,8 @@ class TPMSParams:
     thickness_value: Optional[np.ndarray] = None
     geometry: Optional[np.ndarray] = None
     combination_type: Optional[str] = None
+    geometry_verts: Optional[np.ndarray] = None
+    geometry_faces: Optional[np.ndarray] = None
 
 # ============================================================
 # ============== define internal functions ===================
@@ -211,28 +213,37 @@ def _make_user_define_parameters(params: TPMSParams):
     with col_2:
         st.subheader("Combine with existing geometry")
     if combine_with_geometry:
-        st.info("This feature is not yet implemented. In the future, you will be able to import a mesh or voxel grid and combine it with the generated TPMS structure.")
         browse_file(key = "combined_geometry_path",
             title="Select a matrix file",
             filetypes=[("STL files", "*.stl"), ("Numpy files", "*.npy"), ("All files", "*.*")],)
         if '.npy' in st.session_state["combined_geometry_path"]:
             params.geometry = import_matrix_from_file(file_path = st.session_state["combined_geometry_path"])
             params.geometry = pad_to_square(params.geometry)
+            params.geometry_verts = None
+            params.geometry_faces = None
         elif '.stl' in st.session_state["combined_geometry_path"]:
             from gyroid_utils.mesh_tools import matrix_from_mesh
-            verts, faces = load_STL(st.session_state["combined_geometry_path"])
-            _,_,_, params.geometry = matrix_from_mesh(verts, faces, params.resolution)
+            params.geometry_verts, params.geometry_faces = load_STL(st.session_state["combined_geometry_path"])
+            _,_,_, params.geometry = matrix_from_mesh(params.geometry_verts, params.geometry_faces, params.resolution)
             params.geometry = pad_to_square(params.geometry)
         else:
             st.error("Please select a valid .npy or .stl file for the geometry.")
+            params.geometry_verts = None
+            params.geometry_faces = None
         params.combination_type = st.selectbox("Combination type", ["Intersection", "Union", "Substraction"], key="tpms_combination_type")
-        with col_preview:
-            st.subheader("combined geometry preview")
-            render_mesh_preview(faces, verts, key="c_geometry")
+        # The combined-geometry mesh preview is rendered further down,
+        # *outside* this @st.fragment (right after
+        # _make_user_define_parameters(...) is called). A fragment can
+        # only write widgets into containers created inside itself, but
+        # col_preview was created at module scope before the fragment -
+        # calling render_mesh_preview() (which draws a st.selectbox) here
+        # raises StreamlitFragmentWidgetsNotAllowedOutsideError.
 
     else:
         params.geometry = None
         params.combination_type = None
+        params.geometry_verts = None
+        params.geometry_faces = None
 
 
     st.divider()
@@ -269,6 +280,13 @@ with col_params:
         "Generate", type="primary",
         disabled=(params.source == "Custom equation" and params.custom_equation is None),)
 
+# Rendered here (outside the @st.fragment above), not inside the "Combine
+# with existing geometry" block, because a fragment can't write widgets
+# into col_preview - that container was created outside it.
+if params.geometry_verts is not None and params.geometry_faces is not None:
+    with col_preview:
+        st.subheader("combined geometry preview")
+        render_mesh_preview(params.geometry_faces, params.geometry_verts, key="c_geometry")
 
 
 # ==========================================================
