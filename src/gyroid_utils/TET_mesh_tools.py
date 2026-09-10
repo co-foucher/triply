@@ -22,6 +22,7 @@ def mesh_an_STL(input_path:str,
                 FtetWild_path:str = "C:\\Program Files\\fTetWild\\build\\Release\\FloatTetwild_bin.exe",
                 stop_energy:float = 20.0,
                 epsilon:float = 0.001,
+                edge_length:float = 0.05,
                 CPU_cores:int = 1,
                 print_outputs:bool = False):
     """
@@ -50,6 +51,9 @@ def mesh_an_STL(input_path:str,
         your model's bounding box diagonal length from which all tolerances
         are calculated. Smaller values lead to finer meshes but longer
         runtimes. Default = 0.001.
+    edge_length : float, optional
+        Target edge length for the tetrahedral mesh (default = 0.05).
+        ideal_edge_length = diag_of_bbox * L. (double, optional, default: 0.05)
     CPU_cores : int, optional
         Number of CPU cores to use for meshing (default = 1).
     print_outputs : bool, optional
@@ -78,6 +82,7 @@ def mesh_an_STL(input_path:str,
         "--input", str(input_stl),
         "--output", str(output_msh),
         "--epsr", str(epsilon),
+        "--lr", str(edge_length),
         "--stop-energy", str(stop_energy),
         "--max-threads", str(CPU_cores)]
     if not print_outputs:

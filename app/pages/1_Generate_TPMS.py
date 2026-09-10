@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import streamlit as st
@@ -36,6 +36,7 @@ with st.spinner("Loading GYROIDS toolkit..."):
     from app.components.field_view import render_field_slice
     from app.components.file_picker import browse_file, browse_directory
     from app.components.import_TPMS_files import import_matrix_from_file
+    from app.components.documentation import generate_TPMS_doc
 
 init_state()
 
@@ -59,12 +60,14 @@ BUILTIN_TYPES = {
 
 # ---- Field modes (label -> TPMSModel.compute_field(mode=...) argument) ----
 from app.components.tpms_source_panel import (
+    _adapt_resolution,
     render_field_mode,
     render_threshold,
     render_thickness,
     load_STL,
     generate_ui_tpms,
     pad_to_square,
+    render_period_input,
 )
 
 #dataclasses is a decorator from Python's standard library that turns a plain class into a lightweight data container: 
@@ -81,36 +84,45 @@ class TPMSParams:
     rerun only re-executes that function, so a plain local variable set
     there would never reach the rest of the script.
     """
+    # ----- grid parameters -----
     size_x: float = 10.0
     size_y: float = 10.0
     size_z: float = 10.0
     resolution: int = 64
-    thickness: float = 1.0
-    field_mode: str = "distance"
-    threshold: float = 0.0
+    x: np.ndarray = None
+    y: np.ndarray = None
+    z: np.ndarray = None
+    # ----- implicit field definition -----
+    implicit_field_source: str = "Built-in type"
+    type_name: str = "Gyroid"
+    px: Union[float, np.ndarray] = 5.0
+    py: Union[float, np.ndarray] = 5.0
+    pz: Union[float, np.ndarray] = 5.0
+    custom_equation: str = None
+    field: np.ndarray = None
+    # ----- solid definition -----
+    field_mode: str = "Threshold"
+    threshold: Union[float, np.ndarray] = 0.0
+    thickness: Union[float, np.ndarray] = 1.0
+    # ----- baseplate -----
     baseplate_thickness: float = 0.0
+    # ----- combine with geometry -----
+    geometry: np.ndarray = None
+    combination_type: str = None
+    geometry_verts: np.ndarray = None
+    geometry_faces: np.ndarray = None
+    # ----- mesh parameters -----
     simplification_factor: float = 0.9
     max_faces: bool = False
-    max_faces_count: int = 100_000
+    max_faces_count: int = 100000
     auto_smooth: bool = True
     smoothing_factor: float = 0.9
-    source: str = "Built-in type"
-    type_name: Optional[str] = None
-    px: Optional[float] = None
-    py: Optional[float] = None
-    pz: Optional[float] = None
-    custom_equation: Optional[str] = None
-    custom_thickness: Optional[str] = None
-    field: Optional[np.ndarray] = None
-    thickness_value: Optional[np.ndarray] = None
-    geometry: Optional[np.ndarray] = None
-    combination_type: Optional[str] = None
-    geometry_verts: Optional[np.ndarray] = None
-    geometry_faces: Optional[np.ndarray] = None
+
 
 # ============================================================
 # ============== define internal functions ===================
 # ============================================================
+
 
 
 # ============================================================
@@ -118,7 +130,9 @@ class TPMSParams:
 # ============================================================
 st.title("Generate a TPMS structure")
 
-col_params, col_preview = st.columns([1, 1.4])
+generate_TPMS_doc()  # render the "How it works" explainer, cached so it doesn't re-run every rerun
+
+col_params, col_preview = st.columns([1.4, 1])
 
 # ==========================================================
 # ============== user defined parameters ===================
@@ -142,68 +156,56 @@ def _make_user_define_parameters(params: TPMSParams):
     )
     d1, d2, d3 = st.columns(3)
     params.size_x = d1.number_input("Size X", value=params.size_x, min_value=0.01, key="tpms_size_x")
+
     params.size_y = d2.number_input("Size Y", value=params.size_y, min_value=0.01, key="tpms_size_y")
     params.size_z = d3.number_input("Size Z", value=params.size_z, min_value=0.01, key="tpms_size_z")
+    params.x, params.y, params.z = np.meshgrid(
+            np.linspace(0, params.size_x, params.resolution),
+            np.linspace(0, params.size_y, params.resolution),
+            np.linspace(0, params.size_z, params.resolution),
+            indexing="ij",)
     st.divider()
 
-    # ------ choose TPMS type / paste equation / import from file ------
-    st.subheader("TPMS Definition")
-    params.source = st.radio("Surface", ["Built-in type", "Custom equation", "Import from file"], horizontal=True, key="tpms_source")
-    # Reset every fragment run so generate_ui_tpms() below always sees
-    # values matching the current "Surface" selection, even for the
-    # branches it doesn't use. Stored on params (not plain local
-    # variables) so they survive being set inside this @st.fragment.
-    params.custom_equation = None
-    params.type_name = None
-    params.px = params.py = params.pz = None
-    params.custom_thickness = None
-    params.field = None
-    params.thickness_value = None
-
-    # ---- Built-in type ----
-    if params.source == "Built-in type":
+    # ------ Implcit field definition ------
+    st.subheader("Implicit field definition")
+    params.implicit_field_source = st.radio("Source", ["Built-in type", "Custom equation", "Import from file"], horizontal=True, key="implicit_field_source")
+    if params.implicit_field_source == "Built-in type":
         params.type_name = st.selectbox("TPMS type", list(BUILTIN_TYPES.keys()), key="tpms_type_name")
         c1, c2, c3 = st.columns(3)
-        params.px = c1.number_input("Period X", value=5.0, min_value=0.01, key="tpms_px")
-        params.py = c2.number_input("Period Y", value=5.0, min_value=0.01, key="tpms_py")
-        params.pz = c3.number_input("Period Z", value=5.0, min_value=0.01, key="tpms_pz")
+        with c1:
+            params.px = render_period_input(axis = 'X', params = params,)
+        with c2:
+            params.py = render_period_input(axis = 'Y', params = params,)
+        with c3:
+            params.pz = render_period_input(axis = 'Z', params = params,)
 
-        st.divider()
-        params.field_mode = render_field_mode()
-        params.threshold = render_threshold(params.field_mode)
-        params.thickness = render_thickness(params.field_mode)
-
-    # ---- Custom equation ----
-    elif params.source == "Custom equation":
-        params.custom_equation, params.custom_thickness = render_equation_input()
-        params.field_mode = render_field_mode()
-        params.threshold = render_threshold(params.field_mode)
-        render_thickness(params.field_mode, draw_widget=False,
-            thickness_source_desc="the Thickness formula above")
-
-    # ---- Import from file ----
-    # (after field/thickness_value are loaded from disk)
-    elif params.source == "Import from file":
-        # define TPMS field
+    elif params.implicit_field_source == "Custom equation":
+        params.custom_equation = render_equation_input(label="Custom implicit surface", size_x=params.size_x, size_y=params.size_y, size_z=params.size_z, key_prefix="tpms_custom_equation")
+    elif params.implicit_field_source == "Import from file":
         browse_file(key = "field_matrix_path",
             title="Select a matrix file",
             filetypes=[("Numpy files", "*.npy"), ("CSV files", "*.csv"), ("All files", "*.*")],)
         params.field = import_matrix_from_file(file_path = st.session_state["field_matrix_path"])
+        if params.field is not None :
+            params.field = _adapt_resolution(params.field, params)
 
-        #define thickness field
-        browse_file(key = "thickness_matrix_path",
-            title="Select a matrix file",
-            filetypes=[("Numpy files", "*.npy"), ("CSV files", "*.csv"), ("All files", "*.*")],)
-        params.thickness_value = import_matrix_from_file(file_path = st.session_state["thickness_matrix_path"])
-        params.field_mode = render_field_mode()
-        params.threshold = render_threshold(params.field_mode)
-        render_thickness(params.field_mode, draw_widget=False,
-            thickness_source_desc="the imported thickness file above")
+
     st.divider()
+    # ------ density_field field definition ------
+    st.subheader("Density Field Definition")
+    params.field_mode = render_field_mode()
+    params.threshold = render_threshold(params.field_mode, params=params)
+    params.thickness = render_thickness(params.field_mode, params=params)
 
+    st.divider()
     # ----- add baseplate ------
-    st.subheader("Baseplates")
-    params.baseplate_thickness = st.number_input("Baseplate thickness (0 = none)", value=params.baseplate_thickness, min_value=0.0, key="tpms_baseplate_thickness")
+    col_1, col_2 = st.columns([1, 15], vertical_alignment="bottom")
+    with col_1:
+        add_baseplate = st.checkbox(" ", value=False, key="tpms_add_baseplate")
+    with col_2:
+        st.subheader("Baseplates")
+    if add_baseplate:
+        params.baseplate_thickness = st.number_input("Baseplate thickness (0 = none)", value=params.baseplate_thickness, min_value=0.0, key="tpms_baseplate_thickness")
     st.divider()
 
     # ----- Combine with geometry ------
@@ -231,25 +233,20 @@ def _make_user_define_parameters(params: TPMSParams):
             params.geometry_verts = None
             params.geometry_faces = None
         params.combination_type = st.selectbox("Combination type", ["Intersection", "Union", "Substraction"], key="tpms_combination_type")
-        # The combined-geometry mesh preview is rendered further down,
-        # *outside* this @st.fragment (right after
-        # _make_user_define_parameters(...) is called). A fragment can
-        # only write widgets into containers created inside itself, but
-        # col_preview was created at module scope before the fragment -
-        # calling render_mesh_preview() (which draws a st.selectbox) here
-        # raises StreamlitFragmentWidgetsNotAllowedOutsideError.
-
-    else:
-        params.geometry = None
-        params.combination_type = None
-        params.geometry_verts = None
-        params.geometry_faces = None
-
 
     st.divider()
-
     # ----- mesh parameters ------
+    #smoothing
     st.subheader("Mesh parameters")
+    params.auto_smooth = st.checkbox("Auto-smooth mesh", value=params.auto_smooth,
+            key="tpms_auto_smooth",
+            help="If checked, the mesh is smoothed after simplification and again after fixing.")
+    if params.auto_smooth:
+        params.smoothing_factor = st.slider(
+            "Smoothing factor", 0.0, 1.0, params.smoothing_factor, step=0.01,
+            key="tpms_smoothing_factor",
+            help="Passed to TPMSModel.smooth_mesh(smoothing_factor=...). Higher = more smoothing.")
+    # simplification
     params.simplification_factor = st.slider(
         "Mesh simplification (fraction of faces kept)", 0.1, 1.0, params.simplification_factor,
         key="tpms_simplification_factor",
@@ -262,15 +259,7 @@ def _make_user_define_parameters(params: TPMSParams):
             "Maximum faces", value=params.max_faces_count, min_value=1,
             key="tpms_max_faces_count",
             help="If 'Limit maximum faces' is checked, the mesh is simplified to this many faces.",)
-    params.auto_smooth = st.checkbox("Auto-smooth mesh", value=params.auto_smooth,
-        key="tpms_auto_smooth",
-        help="If checked, the mesh is smoothed after simplification and again after fixing.")
-    if params.auto_smooth:
-        params.smoothing_factor = st.slider(
-            "Smoothing factor", 0.0, 1.0, params.smoothing_factor, step=0.01,
-            key="tpms_smoothing_factor",
-            help="Passed to TPMSModel.smooth_mesh(smoothing_factor=...). Higher = more smoothing.")
-
+    
     return params
 
 with col_params:
@@ -278,11 +267,9 @@ with col_params:
     # ----- generate button ------
     generate = st.button(
         "Generate", type="primary",
-        disabled=(params.source == "Custom equation" and params.custom_equation is None),)
+        disabled=(params.implicit_field_source == "Custom equation" and params.custom_equation is None),)
 
-# Rendered here (outside the @st.fragment above), not inside the "Combine
-# with existing geometry" block, because a fragment can't write widgets
-# into col_preview - that container was created outside it.
+
 if params.geometry_verts is not None and params.geometry_faces is not None:
     with col_preview:
         st.subheader("combined geometry preview")
@@ -294,17 +281,8 @@ if params.geometry_verts is not None and params.geometry_faces is not None:
 # ==========================================================
 if generate:
     generate_ui_tpms(
-        source=params.source,
         params=params,
         BUILTIN_TYPES=BUILTIN_TYPES,
-        type_name=params.type_name,
-        px=params.px, py=params.py, pz=params.pz,
-        custom_equation=params.custom_equation,
-        custom_thickness=params.custom_thickness,
-        field=params.field,
-        thickness_value=params.thickness_value,
-        geometry=params.geometry,
-        combination_type=params.combination_type,
     )
 
 model = st.session_state.get("current_model")
@@ -317,12 +295,23 @@ with col_preview:
     st.subheader("IMPLICIT Field (2D slice)")
     if model is not None and model.implicit_field is not None:
         render_field_slice(
-            model.implicit_field, model.x, model.y, model.z, key="generate",
+            model.implicit_field, model.x, model.y, model.z, key="impolicti_field_preview",
             value_range=st.session_state.get("current_field_range"),
+        )
+        if not isinstance(params.threshold, float) and not isinstance(params.threshold, tuple):
+            st.subheader("Complex Threshold Field (2D slice)")
+            render_field_slice(
+                params.threshold, model.x, model.y, model.z, key="complex_threshold_field_preview",
+            )
+        if not isinstance(params.thickness, float) and not isinstance(params.thickness, tuple):
+            st.subheader("Complex Thickness Field (2D slice)")
+            render_field_slice(
+                params.thickness, model.x, model.y, model.z, key="complex_thickness_field_preview",
         )
     else:
         st.info("Compute a field first to see the 2D slice view.")
 
+    
     st.subheader("Mesh preview")
     if model is not None and model.faces is not None:
         render_mesh_preview(model.faces, model.verts, key="generate")

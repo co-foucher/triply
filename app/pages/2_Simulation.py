@@ -33,9 +33,12 @@ with st.spinner("Loading GYROIDS toolkit..."):
     from app.components.tpms_source_panel import load_STL
     from app.components.mesh_preview import render_mesh_preview
     from app.components.load_preview import render_load_preview
+    from app.components.documentation import simulation_doc
 
 init_state()
 st.title("Mesh + Simulation")
+
+simulation_doc()  # render the "How it works" explainer, cached so it doesn't re-run every rerun
 
 # ===============================================================
 # ================== Tetrahedral meshing ========================
@@ -57,9 +60,10 @@ with col_1:
         "fTetWild executable path",
         value=r"C:\Program Files\fTetWild\build\Release\FloatTetwild_bin.exe",
     )
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     epsilon = c1.number_input("Epsilon (envelope size)", value=0.001, format="%.5f")
-    cpu_cores = c2.number_input("CPU cores", value=1, min_value=1, step=1)
+    cpu_cores = c2.number_input("CPU cores", value=1, min_value=1, step=1, help="Number of CPU cores to use for meshing. More cores = faster meshing.")
+    edge_length = c3.number_input("Edge length", value=0.05, min_value=0.000001, format="%.8f", help="Target edge length for the tetrahedral mesh (relative to the object's bounding box). Smaller values lead to finer meshes but longer runtimes.")
 
     # ------ run fTetWild meshing ------
     if st.button("Run fTetWild meshing"):
@@ -78,7 +82,8 @@ with col_1:
                             file_name=file_name,
                             ftetwild_path=ftetwild_path,
                             epsilon=epsilon,
-                            cpu_cores=cpu_cores)
+                            edge_length=edge_length,
+                            CPU_cores=cpu_cores)
             st.session_state["mesh_job_id"] = job_id
 
     render_job_status(st.session_state["jobs"], "mesh_job_id")

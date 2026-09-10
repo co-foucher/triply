@@ -33,9 +33,12 @@ with st.spinner("Loading GYROIDS toolkit..."):
     from app.components.ct_pipeline import render_ct_pipeline
     from app.components.mesh_preview import render_mesh_preview
     from app.components.ct_viewer_launcher import render_lightweight_toggle, launch_ct_viewer, CT_histogram
+    from app.components.documentation import CT_analysis_doc
 
 init_state()
 st.title("CT Scan Analysis")
+
+CT_analysis_doc()  # render the "How it works" explainer, cached so it doesn't re-run every rerun
 
 # ===========================================
 # =============== functions =================
@@ -217,7 +220,7 @@ if mhd_path:
                          "0/255 binary mask).",
                 )
                 mc_step_size = m2.number_input(
-                    "Step size", value=1, min_value=1, step=1, key="ct_mesh_step",
+                    "Step size", value=10, min_value=1, step=1, key="ct_mesh_step",
                     help="Marching-cubes step size - higher is faster but coarser.",
                 )
                 if st.button("Generate mesh", key="ct_mesh_btn"):

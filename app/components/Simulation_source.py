@@ -24,7 +24,8 @@ def mesh_job(log: Callable[[str], None],
                 file_name: str,
                 ftetwild_path: str,
                 epsilon: float,
-                cpu_cores: int):
+                edge_length: float,
+                CPU_cores: int):
     """
     Runs fTetWild meshing in a background thread and stores its live status/log in st.session_state.
     
@@ -40,6 +41,8 @@ def mesh_job(log: Callable[[str], None],
         Path to the fTetWild executable.
     epsilon : float
         Envelope size for meshing.
+    edge_length : float
+        Target edge length for the tetrahedral mesh (relative to the object's bounding box).
     cpu_cores : int
         Number of CPU cores to use for meshing.
     RETURNS
@@ -55,7 +58,8 @@ def mesh_job(log: Callable[[str], None],
         file_name=file_name,
         FtetWild_path=ftetwild_path,
         epsilon=epsilon,
-        CPU_cores=int(cpu_cores),
+        edge_length=edge_length,
+        CPU_cores=int(CPU_cores),
     )
     log("fTetWild meshing finished - .inp file written.")
     return True

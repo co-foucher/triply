@@ -6,22 +6,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import streamlit as st
 import numpy as np
 
+st.set_page_config(page_title="Prepare Print", layout="wide")
+
 # Heavy imports (mesh/vtk/plotly stack via gyroid_utils) live behind a
 # spinner so the page shows something immediately instead of appearing
 # frozen on first load. Cached after the first import - see
 # src/gyroid_utils/__init__.py.
 with st.spinner("Loading GYROIDS toolkit..."):
-    from gyroid_utils import voxel_tools
-    from gyroid_utils.mesh_tools import matrix_from_mesh, mesh_from_matrix
-
+    from gyroid_utils import voxel_tools, viz
+    from gyroid_utils.mesh_tools import matrix_from_mesh, mesh_from_matrix, export_as_STL
+    from app.state import init_state, get_output_dir
     from app.components.tpms_source_panel import load_STL
     from app.components.file_picker import browse_file
     from app.components.mesh_preview import render_mesh_preview
     from app.components.field_view import render_field_slice
     from app.components.prepare_print_source import detect_overhangs, render_overhang_legend, minimize_overhangs
+    from app.components.documentation import prepare_print_doc
 
     from app.components.tpms_source_panel import (load_STL,
         pad_to_square,)
+
+init_state()
 
 # ============================================================
 # ============== define internal variables ===================
@@ -79,6 +84,8 @@ def load_a_geometry_from_STL(stl_path: str, resolution: int):
 # ===================== Start Page ===========================
 # ============================================================
 st.title("Prepare 3D print of TPMS")
+
+prepare_print_doc()  # render the "How it works" explainer, cached so it doesn't re-run every rerun
 
 col_params, col_preview = st.columns([1, 1.4])
 # ============================================================
@@ -206,3 +213,53 @@ with col_preview:
         render_overhang_legend()
         st.subheader("Solid preview of best orientation")
         render_mesh_preview(page_parameters.faces, page_parameters.R_verts, key="generate_best_orientation_preview")
+
+# ==============================================================
+# ===================== Export result ==========================
+# ==============================================================
+
+st.divider()
+st.subheader("Export result")
+
+# There is no TPMSModel on this page - the mesh here is the *input* STL's
+# (verts, faces) with the vertices rotated into the best print orientation by
+# minimize_overhangs(). So export straight from the arrays via mesh_tools /
+# viz instead of the TPMSModel.export_stl()/save_mesh_preview() helpers the
+# Generate page uses (that `model` name never existed in this file).
+if page_parameters.faces is not None and page_parameters.R_verts is not None:
+    st.caption(
+        "Exports the mesh **in the optimized print orientation** "
+        "(the rotated vertices, original face connectivity)."
+    )
+    name = st.text_input("File name", value="my_tpms-rotated", help="Without extension. Written to the output folder set in the sidebar.")
+    save_preview = st.checkbox(
+        "Also save an .html preview next to the .stl", value=True,
+        help="The Library page pairs each .stl with a same-named .html preview.",
+    )
+
+    # ----- Export STL ------
+    if st.button("Export STL", type="primary", key="export_reoriented_stl"):
+        # Tolerate a typed-in ".stl" and strip any directory part so the file
+        # can't land outside the chosen output folder.
+        stem = Path(name.strip()).name
+        if stem.lower().endswith(".stl"):
+            stem = stem[:-4]
+
+        if not stem:
+            st.error("Please enter a file name.")
+        else:
+            out_path = get_output_dir() / stem
+            try:
+                with st.spinner("Writing STL..."):
+                    export_as_STL(page_parameters.R_verts, page_parameters.faces, str(out_path) + ".stl")
+                    if save_preview:
+                        viz.save_mesh_as_html(
+                            page_parameters.faces, page_parameters.R_verts, str(out_path),
+                            show_normal_colorscale=True,
+                        )
+            except Exception as e:
+                st.error(f"Export failed: {e}")
+            else:
+                st.success(f"Saved {out_path}.stl" + (" (+ preview .html)" if save_preview else ""))
+else:
+    st.info("Select a .stl file and click Generate to compute the best orientation before exporting.")

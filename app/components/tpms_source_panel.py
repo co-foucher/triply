@@ -1,11 +1,14 @@
 
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import streamlit as st
 
 from gyroid_utils.TPMS_classes.tpms_custom import CustomTPMSModel
 from app.components.equation_input import evaluate_custom_inputs, EquationError
+from app.components.file_picker import browse_file
+from app.components.import_TPMS_files import import_matrix_from_file
+from app.components.equation_input import render_equation_input
 
 # ---- Field modes (label -> TPMSModel.compute_field(mode=...) argument) ----
 FIELD_MODES = {
@@ -44,6 +47,7 @@ SHEET_MODES = ("band", "distance")
 5 - render_thickness
 6 - generate_ui_tpms
 7 - pad_to_square
+8 - render_period_input
 #=====================================================================================================================
 """
 
@@ -98,7 +102,7 @@ def render_field_mode() -> str:
         One of "distance", "signed", "signed_inverse", "band".
     """
     mode_label = st.selectbox(
-        "Field mode", list(FIELD_MODES.keys()), index=0,
+        "Field Calculation Mode", list(FIELD_MODES.keys()), index=0,
         key="field_mode",
         help=FIELD_HELPS[st.session_state.get("field_mode", "Distance")],
     )
@@ -142,7 +146,7 @@ def load_STL(stl_path: str) -> tuple[np.ndarray, np.ndarray]:
 # =====================================================================
 # 4) render_threshold
 # =====================================================================
-def render_threshold(field_mode: str) -> float:
+def render_threshold(field_mode: str, params) -> np.ndarray:
     """
     ============================================================================
     4) RENDER_THRESHOLD
@@ -165,20 +169,47 @@ def render_threshold(field_mode: str) -> float:
     if field_mode == "band":
             return 0.0  # Band ignores level/threshold entirely - no widget
     else:
-        return st.number_input(
-            "Field threshold",
-            value=0.0,
-            key="tpms_threshold",
-        )
+        threshold_field_source = st.segmented_control( "Threshold", ["Constant", "Custom equation", "Import from file"], default="Constant", key="threshold_field_source",)
+        if threshold_field_source == "Constant":
+            value = st.number_input(
+                "Field threshold",
+                value=0.0, label_visibility="collapsed")
+            return value
+        elif threshold_field_source == "Custom equation":
+            custom_threshold_equation = render_equation_input(label="Custom threshold", 
+                                                            default_equation = "0.3 + 0.8 * x / max(abs(x))", 
+                                                            key_prefix="threshold_eq",
+                                                            size_x=params.size_x,
+                                                            size_y=params.size_y)
+            if custom_threshold_equation is None:
+                st.error("Please enter a valid custom threshold equation.")
+                return np.full_like(params.x, 0.0)
+            else:
+                custom_threshold = evaluate_custom_inputs(custom_threshold_equation, params.x, params.y, params.z)
+                return np.array(custom_threshold)
+        elif threshold_field_source == "Import from file":
+            browse_file(
+                    key=f"threshold_field_matrix_path",
+                    title=f"Select a threshold matrix file",
+                    filetypes=[("Numpy files", "*.npy"), ("All files", "*.*")],
+                )
+            # import the matrix from file
+            threshold_matrix = import_matrix_from_file(
+                file_path=st.session_state[f"threshold_field_matrix_path"])
+            if threshold_matrix is not None:
+                if threshold_matrix.shape != (params.resolution,) * 3:
+                        threshold_matrix = _adapt_resolution(threshold_matrix, params)
+                return threshold_matrix
 
+    return 0.0
+            
 
 # =====================================================================
 # 5) render_thickness
 # =====================================================================
 def render_thickness(
     field_mode: str,
-    draw_widget: bool = True,
-    thickness_source_desc: str = "the Thickness input above",
+    params,
 ) -> Optional[float]:
     """
     ============================================================================
@@ -192,40 +223,48 @@ def render_thickness(
     ----------
     field_mode : str
         The value returned by render_field_mode().
-    draw_widget : bool, optional
-        If True (default - the "Built-in type" branch's case), this
-        function draws the "Thickness" number_input for SHEET_MODES, and
-        returns 0.0 for SKELETAL_MODES without drawing a widget (those
-        modes don't use thickness at all). If False (the "Custom equation"
-        / "Import from file" branches, which already collected their own
-        thickness elsewhere), no widget is drawn here - instead a caption
-        is shown when field_mode isn't in SHEET_MODES, and this function
-        returns None so the caller keeps using its own thickness value.
-    thickness_source_desc : str, optional
-        Only used when draw_widget=False, to phrase the caption. Pass e.g.
-        "the Thickness formula above" for the equation branch, or "the
-        imported thickness file above" for the file-import branch.
 
     RETURNS
     -------
-    thickness : float or None
-        The Thickness value when draw_widget=True (0.0 for SKELETAL_MODES,
-        the number_input value for SHEET_MODES). None when
-        draw_widget=False - a reminder that this function isn't the source
-        of truth for thickness in that case; nothing needs to be done with
-        the return value.
+    thickness : float or np.ndarray
     """
-    if not draw_widget:
-        if field_mode not in SHEET_MODES:
-            mode_label = FIELD_MODE_LABELS.get(field_mode, field_mode)
-            st.caption(
-                f"Note: {thickness_source_desc} is ignored in "
-                f"'{mode_label}' mode - it doesn't use thickness at all."
-            )
-        return None
+
+    if field_mode not in SHEET_MODES:
+        mode_label = FIELD_MODE_LABELS.get(field_mode, field_mode)
+        st.caption(
+            f"Note: thichkness is not used in {mode_label}' mode."
+        )
+        return None  # thickness is ignored in skeletal modes
 
     if field_mode in SHEET_MODES:
-        return st.number_input("Thickness", value=1.0, min_value=0.05, key="tpms_thickness")
+        #thickness_field_source = st.radio("Field Thickness", ["Constant", "Custom equation", "Import from file"], horizontal=True, key="thickness_field_source")
+        thickness_field_source = st.segmented_control( "Thickness", ["Constant", "Custom equation", "Import from file"], default="Constant", key="thickness_field_source",)
+        if thickness_field_source == "Constant":
+            return st.number_input("Thickness", value=0.6, min_value=0.05, key="tpms_thickness", label_visibility="collapsed")
+        elif thickness_field_source == "Custom equation":
+            custom_thickness_equation = render_equation_input(label="Custom thickness equation", 
+                                                              default_equation = "0.3 + 0.8 * x / max(abs(x))", 
+                                                              key_prefix="thickness_eq",
+                                                              size_x=params.size_x, size_y=params.size_y)
+            if custom_thickness_equation is None:
+                st.error("Please enter a valid custom thickness equation.")
+                return 1.0
+            else:
+                custom_thickness = evaluate_custom_inputs(custom_thickness_equation, params.x, params.y, params.z)
+                return custom_thickness
+        elif thickness_field_source == "Import from file":
+            browse_file(
+                    key=f"thickness_field_matrix_path",
+                    title=f"Select a thickness matrix file",
+                    filetypes=[("Numpy files", "*.npy"), ("All files", "*.*")],
+                )
+            # import the matrix from file
+            thickness_matrix = import_matrix_from_file(
+                file_path=st.session_state[f"thickness_field_matrix_path"])
+            if thickness_matrix is not None:
+                if thickness_matrix.shape != (params.resolution,) * 3:
+                        thickness_matrix = _adapt_resolution(thickness_matrix, params)
+                return thickness_matrix
     return 0.0
 
 
@@ -233,20 +272,8 @@ def render_thickness(
 # 6) generate_ui_tpms
 # =====================================================================
 def generate_ui_tpms(
-    source: str,
     params,
     BUILTIN_TYPES: dict,
-    *,
-    type_name: str = None,
-    px: float = None,
-    py: float = None,
-    pz: float = None,
-    custom_equation: str = None,
-    custom_thickness: str = None,
-    field: np.ndarray = None,
-    thickness_value=None,
-    geometry: np.ndarray = None,
-    combination_type: str = None,
 ) -> None:
     """
     ============================================================================
@@ -258,9 +285,6 @@ def generate_ui_tpms(
 
     PARAMETERS
     ----------
-    source : str
-        One of "Built-in type", "Custom equation", "Import from file" - the
-        selected value of the "Surface" radio button.
     params : TPMSParams
         The generation settings bundle from 1_Generate_TPMS.py (grid size,
         resolution, field mode, threshold, baseplate thickness, mesh
@@ -269,26 +293,6 @@ def generate_ui_tpms(
     BUILTIN_TYPES : dict
         Maps a built-in type label (e.g. "Gyroid") to its TPMSModel
         subclass. Only used when source == "Built-in type".
-    type_name : str, optional
-        Selected built-in type label. Required (non-None) when
-        source == "Built-in type".
-    px, py, pz : float, optional
-        Periods along x/y/z. Required (non-None) when
-        source == "Built-in type".
-    custom_equation : str, optional
-        Custom implicit-field equation string. Required (non-None) when
-        source == "Custom equation".
-    custom_thickness : str, optional
-        Custom thickness formula string, from render_equation_input().
-        Required (non-None) when source == "Custom equation".
-    field : ndarray, optional
-        Imported implicit-field matrix. Required when
-        source == "Import from file"; resampled with
-        voxel_tools.interpolate_voxel_grid() first if its shape doesn't
-        match params.resolution.
-    thickness_value : float or ndarray, optional
-        Imported thickness matrix (or a 1-element array treated as a
-        scalar). Required when source == "Import from file".
 
     RETURNS
     -------
@@ -314,29 +318,23 @@ def generate_ui_tpms(
     try:
         with st.spinner("Computing field and generating mesh..."):
             # ----- Built-in type ------
-            if source == "Built-in type":
-                model = BUILTIN_TYPES[type_name](x, y, z, px, py, pz, params.thickness)
+            if params.implicit_field_source == "Built-in type":
+                model = BUILTIN_TYPES[params.type_name](x, y, z, params.px, params.py, params.pz, params.thickness)
 
             # ----- Custom equation ------
-            elif source == "Custom equation":
-                field, thickness_value = evaluate_custom_inputs(custom_equation, custom_thickness, x, y, z)
-                model = CustomTPMSModel(x, y, z, thickness_value, field=field)
+            elif params.implicit_field_source == "Custom equation":
+                params.field = evaluate_custom_inputs(params.custom_equation, x, y, z)
+                model = CustomTPMSModel(x, y, z, params.thickness, field=params.field)
 
             # ----- Import from file ------
-            elif source == "Import from file":
-                if thickness_value.ndim == 1:
-                    thickness_value = thickness_value[0]  # take the first value as a scalar thickness
-                if field.shape != (params.resolution, params.resolution, params.resolution):
-                    field = _adapt_resolution(field, params)
-                model = CustomTPMSModel(x, y, z, thickness_value, field=field)
+            elif params.implicit_field_source == "Import from file":
+                model = CustomTPMSModel(x, y, z, params.thickness, field=params.field)
 
             # ---- compute density_field ------
             if params.field_mode in SKELETAL_MODES:   # "signed", "signed_inverse"
                 model.compute_field(mode=params.field_mode, level=params.threshold)
-                mesh_iso_level = 0.0
             elif params.field_mode in SHEET_MODES:   # "band", "distance"
                 model.compute_field(mode=params.field_mode, level=params.threshold)
-                mesh_iso_level = 0.0
             else:
                 raise ValueError(f"Unknown field mode: {params.field_mode}")
 
@@ -345,23 +343,23 @@ def generate_ui_tpms(
                 model.add_baseplates(thickness=params.baseplate_thickness)
 
             # ----- combine with imported geometry ------
-            if geometry is not None:
-                if geometry.shape != (params.resolution, params.resolution, params.resolution):
-                    geometry = _adapt_resolution(geometry, params)
-                    geometry = geometry > 0.5
-                if combination_type == "Union":
-                    model.density_field[geometry > 0] = 1  # union: set solid where geometry is solid
+            if params.geometry is not None:
+                if params.geometry.shape != (params.resolution, params.resolution, params.resolution):
+                    params.geometry = _adapt_resolution(params.geometry, params)
+                    params.geometry = params.geometry > 0.5
+                if params.combination_type == "Union":
+                    model.density_field[params.geometry > 0] = 1  # union: set solid where geometry is solid
                     #model.density_field[geometry <= 0] = 0  # union: set solid where geometry is solid
-                elif combination_type == "Intersection":
-                    model.density_field[geometry == 0] = -1  # intersection: set non-solid where geometry is non-solid
-                elif combination_type == "Substraction":
-                    model.density_field[geometry > 0] = -1       # difference:  first, set solid where geometry is solid
+                elif params.combination_type == "Intersection":
+                    model.density_field[params.geometry == 0] = -1  # intersection: set non-solid where geometry is non-solid
+                elif params.combination_type == "Substraction":
+                    model.density_field[params.geometry > 0] = -1       # difference:  first, set solid where geometry is solid
                 else:
-                    st.error(f"Unknown combination type: {combination_type}")
+                    st.error(f"Unknown combination type: {params.combination_type}")
 
             # ----- generate mesh ------
             st.session_state["current_field_range"] = (float(model.implicit_field.min()), float(model.implicit_field.max()))
-            model.generate_mesh(iso_level=mesh_iso_level)
+            model.generate_mesh(iso_level=0)
             if params.auto_smooth:
                 model.smooth_mesh(smoothing_factor=params.smoothing_factor)
             target_faces = params.max_faces_count if params.max_faces else params.simplification_factor
@@ -370,7 +368,6 @@ def generate_ui_tpms(
             is_valid = model.check_mesh_quality()
 
         st.session_state["current_model"] = model
-        st.session_state["current_equation"] = custom_equation
 
         if not is_valid:
             st.warning(
@@ -412,3 +409,91 @@ def pad_to_square(matrix, pad_value=0):
     target = max(matrix.shape)
     pad_width = [(0, target - dim) for dim in matrix.shape]
     return np.pad(matrix, pad_width=pad_width, mode="constant", constant_values=pad_value)
+
+
+# =====================================================================
+# 8) render_period_input
+# =====================================================================
+def render_period_input(
+    axis: str,
+    params,
+    default: float = 5.0,
+) -> Optional[Union[float, np.ndarray]]:
+    """
+    ============================================================================
+    8) RENDER_PERIOD_INPUT
+    Draws the "Period <axis>" input for one grid axis: a segmented control
+    to choose between a constant value and an imported per-voxel period
+    field, plus the widget for whichever source is selected. Replaces three
+    near-identical copies of this logic (one per axis) that used to live
+    inline in 1_Generate_TPMS.py.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    axis : str
+        Axis label, e.g. "X", "Y", "Z" - used in widget labels/keys and
+        error messages.
+    params : TPMSParams
+        Generation settings bundle; params.resolution gives the target grid
+        size, used to validate/resample an imported period field.
+    default : float, optional
+        Default value for the "Constant" number_input (default 5.0).
+    
+    RETURNS
+    -------
+    period : float, np.ndarray, or None
+    """
+    # ------ select source: constant vs imported matrix -----
+    source = st.segmented_control(
+        f"Period {axis}", ["Constant", "Custom", "Import"],
+        default="Constant",
+        key=f"period_{axis.lower()}_source",
+    )
+
+    # ------ if source == constant ------
+    if source == "Constant":
+        return st.number_input(
+            f"Period {axis}", value=default, min_value=0.01,
+            key=f"tpms_p{axis.lower()}",label_visibility="collapsed",
+        )
+
+    # ------ if source == custom ------
+    if source == "Custom":
+        custom_period_equation = render_equation_input(
+            label=f"Custom Period {axis} equation",
+            default_equation=f"2.0 + 4.0 * {axis.lower()} / max(abs({axis.lower()}))",
+            key_prefix=f"period_{axis.lower()}_eq",
+            size_x=params.size_x, size_y=params.size_y,
+        )
+        if custom_period_equation is None:
+            st.error(f"Please enter a valid custom Period {axis} equation.")
+            return 5.0
+        else:
+            custom_period = evaluate_custom_inputs(
+                custom_period_equation, params.x, params.y, params.z
+            )
+            return np.array(custom_period)
+
+    # ------ if source == import ------
+    # Render the "Browse..." button and 
+    browse_file(
+        key=f"{axis.upper()}_period_matrix_path",
+        title=f"Select a {axis.upper()}-period matrix file",
+        filetypes=[("Numpy files", "*.npy"), ("All files", "*.*")],
+        small_ui=True,
+    )
+    # import the matrix from file
+    period_matrix = import_matrix_from_file(
+        file_path=st.session_state[f"{axis.upper()}_period_matrix_path"]
+    )
+    # validate the imported matrix
+    if period_matrix is None:
+        st.error(f"Please select a valid {axis.upper()}-period matrix file.")
+        return None  # import failed / no file picked yet - already reported
+    elif period_matrix.ndim != 3:
+        st.error(f"Please select a valid 3D array for Period {axis}.")
+        return None
+    elif period_matrix.shape != (params.resolution,) * 3:
+        period_matrix = _adapt_resolution(period_matrix, params)
+    return period_matrix

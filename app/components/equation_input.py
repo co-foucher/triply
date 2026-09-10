@@ -261,13 +261,9 @@ def evaluate_equation(equation: str, x: np.ndarray, y: np.ndarray, z: np.ndarray
     return np.broadcast_to(np.asarray(result, dtype=float), np.asarray(x).shape).copy()
 
 
-DEFAULT_EQUATION = (
-    "sin(pi * x / 2) * cos(pi * y / 2) + "
-    "sin(pi * y / 2) * cos(pi * z / 2) + "
-    "sin(pi * z / 2) * cos(pi * x / 2) "
-)
 
 
+'''
 # =====================================================================
 # 5) render_equation_input
 # =====================================================================
@@ -346,12 +342,12 @@ def render_equation_input(key_prefix: str = "eq") -> Optional[str]:
     st.success(message)
 
     return equation, thickness
-
+'''
 
 # =====================================================================
 # 6) evaluate_custom_inputs
 # =====================================================================
-def evaluate_custom_inputs(equation: str, thickness: str,
+def evaluate_custom_inputs(equation: str, 
                            x: np.ndarray, y: np.ndarray, z: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     ============================================================================
@@ -365,16 +361,16 @@ def evaluate_custom_inputs(equation: str, thickness: str,
 
     PARAMETERS
     ----------
-    equation, thickness : str
-        The strings returned by render_equation_input().
+    equation : str
+        The string returned by render_equation_input().
     x, y, z : np.ndarray
         The real (full-resolution) coordinate grids to evaluate on - not
         the small preview grid used inside render_equation_input().
 
     RETURNS
     -------
-    field, thickness_value : np.ndarray, np.ndarray
-        Evaluated arrays, each the same shape as x.
+    field : np.ndarray
+        Evaluated array
 
     RAISES
     ------
@@ -386,5 +382,83 @@ def evaluate_custom_inputs(equation: str, thickness: str,
         real domain.
     """
     field = evaluate_equation(equation, x, y, z)
-    thickness_value = evaluate_equation(thickness, x, y, z)
-    return field, thickness_value
+    return field
+
+
+
+
+# =====================================================================
+# 7) render_equation_input_implicit_field
+# =====================================================================
+
+DEFAULT_EQUATION = (
+    "sin(pi * x / 2) * cos(pi * y / 2) + "
+    "sin(pi * y / 2) * cos(pi * z / 2) + "
+    "sin(pi * z / 2) * cos(pi * x / 2) "
+)
+def render_equation_input(label: str = "Default label", 
+                          default_equation: str = DEFAULT_EQUATION,
+                          key_prefix: str = "eq",
+                          size_x: float = 10.0,
+                          size_y: float = 10.0,
+                          size_z: float = 10.0
+                          ) -> Optional[str]:
+    """
+    ============================================================================
+    5) RENDER_EQUATION_INPUT
+    Renders the formula text box, validates it, and (if valid) shows a
+    cheap 2D mid-slice preview computed on a small grid - independent of
+    the full-resolution grid used for actual generation, so feedback is
+    near-instant even before clicking "Generate".
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    key_prefix : str, optional
+        Prefix used to namespace this widget's Streamlit session_state
+        keys (default = "eq"), so multiple equation inputs can coexist
+        on the same page.
+
+    RETURNS
+    -------
+    equation, thickness : tuple[str, str], or None
+        The (equation, thickness) formula strings if both validated
+        successfully. None if either failed validation (the caller should
+        disable the Generate button while this is None).
+    """
+    st.caption("Variables: x, y, z, pi ")
+    st.caption("functions: sin, cos, tan, sinh, cosh, tanh, exp, log, sqrt, abs, max, min")
+
+    # =================================================
+    # ============ define implicit field ==============
+    # =================================================
+    equation = st.text_area(
+        f"{label} equation F(x, y, z)",
+        value=st.session_state.get(f"{key_prefix}_text", default_equation),
+        key=f"{key_prefix}_text",
+        height=80,
+    )
+    ok_eq, message = validate_equation(equation)
+    if not ok_eq:
+        st.error(message)
+        return None
+    st.success(message)
+
+    # =================================================
+    # =========== visualize implicit field ============
+    # =================================================
+
+    with st.expander("Preview of Field (mid z-slice, low-res)", expanded=False):
+        _, fn = parse_equation(equation)
+        n = 120
+        g1 = np.linspace(0, size_x, n)
+        g2 = np.linspace(0, size_y, n)
+        gx, gy = np.meshgrid(g1, g2, indexing="ij")
+        gz = np.zeros_like(gx) + size_z / 2.0
+        field = fn(gx, gy, gz)
+        field = np.broadcast_to(np.asarray(field, dtype=float), gx.shape)
+
+        fig = go.Figure(go.Heatmap(x=g1, y=g2, z=field.T, colorscale="Portland"))
+        fig.update_layout(height=350, margin=dict(l=0, r=0, t=20, b=0))
+        st.plotly_chart(fig, width="stretch", key =f"{key_prefix}_preview")
+    return equation

@@ -116,7 +116,8 @@ def _render_browse_button(key: str, on_click: Callable[[], None]) -> None:
 # =====================================================================
 def browse_file(key: str, 
                 title: str = "Select a file",
-                filetypes: Optional[List[Tuple[str, str]]] = None) -> None:
+                filetypes: Optional[List[Tuple[str, str]]] = None,
+                small_ui: bool = False) -> None:
     """
     ============================================================================
     3) BROWSE_FILE
@@ -151,24 +152,23 @@ def browse_file(key: str,
         the dialog's result on the same rerun). Read
         st.session_state[key] after calling this to get the current
         path.
-
-    NOTES
-    -----
-    The text_input's label is fixed at "Path to file" - there's currently
-    no way to customize it per call site (earlier revisions of this
-    function took a `label` argument for that; it was dropped).
-
-    Requires a local display and tkinter (bundled with standard Python
-    installs on Windows/macOS; on Linux may need the `python3-tk` system
-    package). If unavailable, shows an st.error instead of crashing the
-    whole page.
     """
 
-    col_path, col_browse = st.columns([5, 1.5], vertical_alignment="bottom")
-    with col_path:
-        file_path = st.text_input("Path to file", key=key)
-    with col_browse:
-        st.write("")  # spacer so the button lines up with the text box, not its label
+    if not small_ui:
+        col_path, col_browse = st.columns([5, 1.5], vertical_alignment="bottom")
+        with col_path:
+            file_path = st.text_input("Path to file", key=key)
+        with col_browse:
+            st.write("")  # spacer so the button lines up with the text box, not its label
+            _render_browse_button(  key = key, 
+                                    on_click = lambda: _run_native_dialog(
+                                        key = key, 
+                                        method = "askopenfilename",
+                                        title = title, 
+                                        filetypes=filetypes or [("All files", "*.*")],)
+                                    )
+    else:
+        st.session_state.setdefault(key, "")   # initialize the key if it doesn't exist yet
         _render_browse_button(  key = key, 
                                 on_click = lambda: _run_native_dialog(
                                     key = key, 
@@ -176,6 +176,7 @@ def browse_file(key: str,
                                     title = title, 
                                     filetypes=filetypes or [("All files", "*.*")],)
                                 )
+        
 
 
 # =====================================================================

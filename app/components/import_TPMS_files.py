@@ -30,12 +30,15 @@ def import_matrix_from_file(file_path):
         The imported matrix, or None if import failed (also shows an
         st.error with the exception message).
     """
+    if file_path is None or file_path == "":
+        return None  # no file picked yet
     try:
         if file_path.endswith(".npy"):
             matrix = np.load(file_path)
+            return matrix
         else:
             matrix = np.loadtxt(file_path)
-        return matrix
+            return np.asarray(matrix)
     except Exception as e:
         st.error(f"Error importing matrix from file: {e}")
         return None
