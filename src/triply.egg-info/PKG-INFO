@@ -1,13 +1,13 @@
 Metadata-Version: 2.4
-Name: gyroid_utils
-Version: 3.1.4
+Name: triply
+Version: 4.0.0
 Summary: Gyroid and lattice design utilities: field generation, mesh processing, STL/INP I/O, and simulation helpers.
 Author-email: Corentin Foucher <corentin.foucher@empa.ch>
 License: EMPA
-Project-URL: Homepage, https://github.com/your-account/gyroids
-Project-URL: Documentation, https://github.com/your-account/gyroids
-Project-URL: Source, https://github.com/your-account/gyroids
-Project-URL: Issues, https://github.com/your-account/gyroids/issues
+Project-URL: Homepage, https://github.com/co-foucher/triply
+Project-URL: Documentation, https://github.com/co-foucher/triply
+Project-URL: Source, https://github.com/co-foucher/triply
+Project-URL: Issues, https://github.com/co-foucher/triply/issues
 Keywords: mesh,geometry,gyroid,OpenCascade,STL,STEP,visualization,lattice
 Classifier: Programming Language :: Python :: 3
 Classifier: License :: Other/Proprietary License
@@ -44,9 +44,11 @@ Requires-Dist: torch; extra == "gpu"
 Requires-Dist: ninja; extra == "gpu"
 Requires-Dist: cumcubes @ git+https://github.com/lzhnb/CuMCubes.git ; extra == "gpu"
 
-# **GYROIDS UTILS**
+# **triply**
 
-  This is a small library to support the development of TPMS structures. It is developed around three use cases, and its structure is shown below
+  *Formerly `gyroid_utils` (repo `GYROIDS`), renamed in v4.0.0: replace `import gyroid_utils` with `import triply`.*
+
+  This is a small library to support the development of TPMS structures. Its Streamlit GUI is called **coroforge**. It is developed around three use cases, and its structure is shown below
 
  <img width="1531" height="865" alt="image" src="https://github.com/user-attachments/assets/2d937bd7-631f-4cb0-888b-6f7126523808" />
 
@@ -57,14 +59,14 @@ Requires-Dist: cumcubes @ git+https://github.com/lzhnb/CuMCubes.git ; extra == "
 # **INSTALLATION**
 ## Core dependencies
   - Use pip to install only this library and its dependencies. 
-  - It is better to first create a python 3.10 venv and then use pip install git+https://github.com/co-foucher/GYROIDS.git
+  - It is better to first create a python 3.10 venv and then use pip install git+https://github.com/co-foucher/triply.git
 
 ```powershell
       conda create -n nameofenv python=3.10
       conda install git
-      pip install git+https://github.com/co-foucher/GYROIDS.git
+      pip install git+https://github.com/co-foucher/triply.git
 ```
-  - For changes: update the toml file and then use pip install git+https://github.com/co-foucher/GYROIDS.git
+  - For changes: update the toml file and then use pip install git+https://github.com/co-foucher/triply.git
 
 ## GUI optional dependency
   - The GUI is optional, thus needs to be specifically named when installing
@@ -72,10 +74,11 @@ Requires-Dist: cumcubes @ git+https://github.com/lzhnb/CuMCubes.git ; extra == "
 ```powershell
       conda create -n nameofenv python=3.10
       conda install git
-      pip install "gyroid_utils[gui] @ git+https://github.com/co-foucher/GYROIDS.git"
+      pip install "triply[gui] @ git+https://github.com/co-foucher/triply.git"
 ```
 
 ## CUDA accelerated marching cube optional dependency
+  - THIS IS NOT WORKING (YET)
   - This is also optional, thus needs to be specifically named when installing
   - You NEED to install torch previously
 
@@ -83,20 +86,39 @@ Requires-Dist: cumcubes @ git+https://github.com/lzhnb/CuMCubes.git ; extra == "
       conda create -n nameofenv python=3.10
       conda install git
       pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu132
-      pip install "gyroid_utils[gpu] @ git+https://github.com/co-foucher/GYROIDS.git"
+      pip install "triply[gpu] @ git+https://github.com/co-foucher/triply.git"
 ```
 
 ## local installation
   - If you download the whole repository, you can then use the folder as a source for the library and make any change you want that will also take effect immediately
-  - `pip install -e .` behaves the same as the git-URL install above: it only installs the core dependencies. To also install the optional GUI and GPU dependencies, use the extras syntax:
+  - `pip install -e .` behaves the same as the git-URL install above: it only installs the core dependencies. To also install the optional GUI dependencies, use the extras syntax:
 
 ```powershell
   cd "C:\Users\PATHtoFILES"
   conda create -n nameofenv python=3.10
   conda install git
-  pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu132
-  pip install -e ".[gui,gpu]" --no-build-isolation
+  pip install -e ".[gui]"
 ```
+
+# Launching the App (GUI)
+There is a small [Streamlit](https://streamlit.io) front end, **coroforge** (`app/`), over the library — forms/wiring around the existing TPMS / mesh / simulation / CT functions, no pipeline logic of its own.
+
+  - First install the `gui` extra (see **GUI optional dependency** above).
+  - Then, from the repo root, run:
+
+```powershell
+      streamlit run app/Home.py
+```
+
+  - This opens the app in your browser automatically (default: http://localhost:8501).
+
+Pages (in the sidebar):
+- **Generate TPMS**: built-in surfaces or a custom equation, live preview, export STL — fully functional
+- **Simulation**: mesh an STL with fTetWild and launch ABAQUS batches — wired to the real `triply` calls, but minimal parameter coverage
+- **CT Analysis**: convert/inspect CT volumes — wired to the real `triply` calls, but minimal parameter coverage
+- **Library**: browse previously generated structures — a simple file browser over the output folder
+
+The output folder (where generated `.stl`/`.html`/`.npz` files are written and read from) can be changed from the sidebar; it defaults to `app/gui_outputs/`.
 
 # Known Bugs
 Coordinates in the STL mesh do not match exactly the definition in the matrix. This is due to the marching cube algorithm, resulting in structure about a pixel larger in every dimension.
@@ -109,7 +131,7 @@ This is used to generate TPMS structures (especially gyroids) using the general 
 <img width="1894" height="921" alt="image" src="https://github.com/user-attachments/assets/c65cae60-cd07-47e0-a794-d1a3a486b6e0" />
 note that it was originaly designed for creating gyroid, but not limited to them.
 
-All TPMS model code now lives under the **`TPMS_classes/`** subpackage (`src/gyroid_utils/TPMS_classes/`), which re-exports everything so `from gyroid_utils.TPMS_classes import GyroidModel` (etc.) works without reaching into individual files.
+All TPMS model code now lives under the **`TPMS_classes/`** subpackage (`src/triply/TPMS_classes/`), which re-exports everything so `from triply.TPMS_classes import GyroidModel` (etc.) works without reaching into individual files.
 
 Scripts related to this use case:
 - **TPMS_classes/tpms_base.py**: Shared `TPMSModel` base class — field computation, meshing, export, previews, quality checks, and baseplates. Every TPMS type is a thin subclass that only supplies its implicit surface equation.
@@ -125,7 +147,7 @@ Scripts related to this use case:
 - **mesh_tools.py**: Mesh processing functions (simplification, smoothing, fixing, validation, export), plus `matrix_from_mesh()` (voxelize a mesh back into a filled 3D grid — the inverse of `mesh_from_matrix`) and `auto_smooth_mesh()` (runs Taubin smoothing in batches and stops automatically once a roughness metric plateaus, instead of a hand-picked iteration count)
 - **io_ops.py**: Input/output operations (STL loading/saving, .npz archives)
 - **viz.py**: Visualization tools (HTML previews, histograms, 2D matrix views)
-- **voxel_overhang_tools.py**: Print-readiness tools for a solid/empty voxel grid:
+- **voxel_tools.py**: Print-readiness tools for a solid/empty voxel grid:
   - `detect_overhangs()`: flags voxels whose overhang angle (relative to the build plate, along z) exceeds a threshold (default 45°), and recognizes safe bridges (span supported from both sides) as distinct from true overhangs.
   - `find_optimal_orientation()`: samples build directions over a sphere and returns the reoriented grid with the fewest overhangs/bridges — an automatic "best way to print this" search.
   - Support for optional automatic support-voxel insertion under unsupported overhangs (`add_support_voxels`, still marked experimental in the code).
@@ -175,7 +197,7 @@ Other scripts exist for configuring this library and some useful functions
 - Three field computation modes: `'abs'`, `'signed'`, and `'distance'`/`'distance_fast'` for flexible wall definition
 - Support for variable periods and thickness (scalar or per-voxel arrays)
 - Optional baseplates for structural support
-- Overhang/print-readiness check on the voxel grid (`voxel_overhang_tools.detect_overhangs()`), flagging voxels beyond a configurable overhang angle (default 45°) while recognizing safe two-sided bridges
+- Overhang/print-readiness check on the voxel grid (`voxel_tools.detect_overhangs()`), flagging voxels beyond a configurable overhang angle (default 45°) while recognizing safe two-sided bridges
 - Automatic build-orientation search (`find_optimal_orientation()`) that reorients the grid to minimize overhangs/bridges
 
 ## Surface Mesh Processing
@@ -222,7 +244,7 @@ The `GyroidModel` class is the main entry point for gyroid generation. The typic
 
 ```python
 import numpy as np
-from gyroid_utils.TPMS_classes import GyroidModel
+from triply.TPMS_classes import GyroidModel
 
 # Create a 64×64×64 grid
 x, y, z = np.meshgrid(np.linspace(0,1,64),
@@ -248,7 +270,7 @@ model.export_stl("my_gyroid.stl")
 model.save("gyroid_data.npz")  # Save field for later
 ```
 
-Any other TPMS type works the same way — just import a different class, e.g. `from gyroid_utils.TPMS_classes import DiamondModel`.
+Any other TPMS type works the same way — just import a different class, e.g. `from triply.TPMS_classes import DiamondModel`.
 
 ### All-in-One Function
 
@@ -256,7 +278,7 @@ For a quicker workflow, use `create_a_gyroid()`:
 
 ```python
 import numpy as np
-from gyroid_utils.TPMS_classes import create_a_gyroid
+from triply.TPMS_classes import create_a_gyroid
 
 x, y, z = np.meshgrid(np.linspace(0,10,128),
                       np.linspace(0,10,128),
@@ -273,15 +295,15 @@ create_a_gyroid(
 )
 ```
 
-For more detailed API documentation and parameters, see [tpms_base.py](src/gyroid_utils/TPMS_classes/tpms_base.py) (shared pipeline) and [tpms_gyroid.py](src/gyroid_utils/TPMS_classes/tpms_gyroid.py) (gyroid-specific equation), or check out the example notebooks.
+For more detailed API documentation and parameters, see [tpms_base.py](src/triply/TPMS_classes/tpms_base.py) (shared pipeline) and [tpms_gyroid.py](src/triply/TPMS_classes/tpms_gyroid.py) (gyroid-specific equation), or check out the example notebooks.
 
 
 # Logging
 Control logging verbosity:
 
 ```python
-import gyroid_utils
-gyroid_utils.set_log_level("DEBUG")  # or "INFO", "WARNING", "ERROR", "CRITICAL"
+import triply
+triply.set_log_level("DEBUG")  # or "INFO", "WARNING", "ERROR", "CRITICAL"
 ```
 
 # License
