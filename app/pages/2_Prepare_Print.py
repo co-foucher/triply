@@ -1,3 +1,14 @@
+"""
+Prepare an STL for 3D printing: voxelize it, label its overhangs, bridges
+and required supports, and search for the print orientation that needs the
+least of them.
+
+STATUS: functional. The best orientation is previewed (slice view +
+rotated solid) and exported as an .stl - the input mesh's faces with the
+vertices rotated - optionally with the same-named .html preview the
+Library page pairs it with. The support voxels are a cost metric for the
+orientation score rather than printable supports.
+"""
 from dataclasses import dataclass
 import sys
 from pathlib import Path

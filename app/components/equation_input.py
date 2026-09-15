@@ -458,7 +458,22 @@ def render_equation_input(label: str = "Default label",
         field = fn(gx, gy, gz)
         field = np.broadcast_to(np.asarray(field, dtype=float), gx.shape)
 
+        # Keep the drawn slice physically proportioned: height / width = size_y / size_x.
+        # The longest side is capped at BASE_PX, and COLORBAR_PX reserves the strip the
+        # colorbar eats on the right so the heatmap itself (not the figure box) gets the ratio.
+        BASE_PX = 450.0
+        COLORBAR_PX = 90.0
+        ratio = float(size_y) / float(size_x) if size_x else 1.0
+        plot_h, plot_w = (BASE_PX, BASE_PX / ratio) if ratio >= 1.0 else (BASE_PX * ratio, BASE_PX)
+
         fig = go.Figure(go.Heatmap(x=g1, y=g2, z=field.T, colorscale="Portland"))
-        fig.update_layout(height=350, margin=dict(l=0, r=0, t=20, b=0))
-        st.plotly_chart(fig, width="stretch", key =f"{key_prefix}_preview")
+        fig.update_layout(
+            width=int(round(plot_w + COLORBAR_PX)),
+            height=int(round(plot_h)),
+            margin=dict(l=0, r=0, t=20, b=0),
+        )
+        # one unit along x renders the same length as one unit along y
+        fig.update_xaxes(constrain="domain")
+        fig.update_yaxes(scaleanchor="x", scaleratio=1.0, constrain="domain")
+        st.plotly_chart(fig, width="content", key=f"{key_prefix}_preview")
     return equation

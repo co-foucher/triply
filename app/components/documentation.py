@@ -260,9 +260,9 @@ def prepare_print_doc():
             st.markdown(
                 "No slicing, no scaling, and the support voxels are only a "
                 "*preview* - they are not exported in the stl.  "
-                "Use the result to set how to rotate the part "
-                "in your slicer, and let the slicer build the real "
-                "supports."
+                "What *is* exported is the mesh already rotated into the "
+                "winning orientation, so the slicer is only left with "
+                "building the real supports."
             )
 
 
