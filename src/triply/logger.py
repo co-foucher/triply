@@ -3,7 +3,7 @@ import sys
 
 
 # Create top-level logger
-logger = logging.getLogger("gyroid_utils")
+logger = logging.getLogger("triply")
 logger.setLevel(logging.INFO)  # default level
 
 # Create handler (stdout)
@@ -36,7 +36,7 @@ def set_log_level(level: str):
     """
     ============================================================================
     1) SET_LOG_LEVEL
-    Sets the global logging level for the gyroid_utils package.
+    Sets the global logging level for the triply package.
     ============================================================================
 
     PARAMETERS
@@ -50,7 +50,7 @@ def set_log_level(level: str):
 
     EXAMPLE
     -------
-    >>> import gyroid_utils
-    >>> gyroid_utils.set_log_level("DEBUG")
+    >>> import triply
+    >>> triply.set_log_level("DEBUG")
     """
     logger.setLevel(level.upper())

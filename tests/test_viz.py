@@ -1,13 +1,13 @@
 """
-Tests for gyroid_utils.viz.
+Tests for triply.viz.
 """
 import logging
 
 import numpy as np
 import pytest
 
-#this is just like the import in gyroid_utils.viz, but we do it here so that pytest can skip all tests in this module if gyroid_utils isn't importable
-viz = pytest.importorskip("gyroid_utils.viz")
+#this is just like the import in triply.viz, but we do it here so that pytest can skip all tests in this module if triply isn't importable
+viz = pytest.importorskip("triply.viz")
 
 """
 ============================================================================
@@ -75,7 +75,7 @@ class TestSaveMeshAsHtml:
         """If none of the four show_*_colorscale flags are True, it should log a warning and fall back to normal colorscale rather than silently render nothing."""
         verts, faces = _make_triangle_mesh()
         outfile = tmp_path / "preview"
-        with caplog.at_level(logging.WARNING, logger="gyroid_utils"):
+        with caplog.at_level(logging.WARNING, logger="triply"):
             viz.save_mesh_as_html(faces, verts, str(outfile))
         assert "Defaulting to normal colorscale" in caplog.text
 
@@ -83,7 +83,7 @@ class TestSaveMeshAsHtml:
         """If more than one show_*_colorscale flag is True, it should log a warning and fall back to normal colorscale rather than picking one arbitrarily."""
         verts, faces = _make_triangle_mesh()
         outfile = tmp_path / "preview"
-        with caplog.at_level(logging.WARNING, logger="gyroid_utils"):
+        with caplog.at_level(logging.WARNING, logger="triply"):
             viz.save_mesh_as_html(
                 faces, verts, str(outfile),
                 show_flat_colorscale=True,

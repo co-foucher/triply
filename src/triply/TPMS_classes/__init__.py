@@ -22,7 +22,7 @@ from . import tpms_splitp
 from . import tpms_custom
 
 # Re-export the model classes and factory functions so callers can do
-# `from gyroid_utils.TPMS_classes import GyroidModel` instead of reaching
+# `from triply.TPMS_classes import GyroidModel` instead of reaching
 # into the individual surface modules.
 from .tpms_base import TPMSModel, create_a_tpms
 from .tpms_gyroid import GyroidModel, create_a_gyroid
@@ -36,7 +36,7 @@ from .tpms_lidinoid import LidinoidModel, create_a_lidinoid
 from .tpms_splitp import SplitPModel, create_a_split_p
 from .tpms_custom import CustomTPMSModel, create_a_custom_tpms
 
-#it defines what from gyroid_utils.TPMS_classes import * actually imports.
+#it defines what from triply.TPMS_classes import * actually imports.
 __all__ = [
     "tpms_base",
     "tpms_gyroid",

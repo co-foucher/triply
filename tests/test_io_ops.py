@@ -1,11 +1,11 @@
 """
-Tests for gyroid_utils.io_ops.
+Tests for triply.io_ops.
 """
 import numpy as np
 import pytest
 
-#this is just like the import in gyroid_utils.io_ops, but we do it here so that pytest can skip all tests in this module if gyroid_utils isn't importable
-io_ops = pytest.importorskip("gyroid_utils.io_ops")
+#this is just like the import in triply.io_ops, but we do it here so that pytest can skip all tests in this module if triply isn't importable
+io_ops = pytest.importorskip("triply.io_ops")
 
 """
 ============================================================================
@@ -133,7 +133,7 @@ class TestGyroidModelSaveLoadRoundtrip:
         data (verts/faces) isn't part of the saved format, so it should come
         back None on the loaded copy, per GyroidModel.load()'s docstring.
         """
-        gyroid_mod = pytest.importorskip("gyroid_utils.TPMS_classes.tpms_gyroid")
+        gyroid_mod = pytest.importorskip("triply.TPMS_classes.tpms_gyroid")
         lin = np.linspace(0, 2, 6)
         x, y, z = np.meshgrid(lin, lin, lin, indexing="ij")
         model = gyroid_mod.GyroidModel(x, y, z, 1.0, 1.0, 1.0, 0.2)

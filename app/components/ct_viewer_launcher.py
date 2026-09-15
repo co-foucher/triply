@@ -1,5 +1,5 @@
 """
-Launches gyroid_utils.CT_visualization_window's interactive viewer as a
+Launches triply.CT_visualization_window's interactive viewer as a
 separate process for a given .mhd file already on disk. Shared by
 app/pages/3_CT_Analysis.py (loaded volume) and app/components/ct_pipeline.py
 (processed mask preview) so the subprocess/backend-forcing logic and the
@@ -73,7 +73,7 @@ def launch_ct_viewer(mhd_path: str, lightweight: bool = False) -> None:
     """
     ============================================================================
     2) LAUNCH_CT_VIEWER
-    Launches gyroid_utils.CT_visualization_window on `mhd_path` in a
+    Launches triply.CT_visualization_window on `mhd_path` in a
     separate process - open_window (full) or lightweigth_open, depending
     on `lightweight`.
     ============================================================================
@@ -106,7 +106,7 @@ def launch_ct_viewer(mhd_path: str, lightweight: bool = False) -> None:
         [
             sys.executable, "-c",
             "import matplotlib; matplotlib.use('QtAgg'); "
-            "import SimpleITK as sitk, gyroid_utils.CT_visualization_window as w; "
+            "import SimpleITK as sitk, triply.CT_visualization_window as w; "
             f"w.{entrypoint}(sitk.ReadImage(r'{mhd_path}'))",
         ],
         env=env,

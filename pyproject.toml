@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "gyroid_utils"
-version = "3.1.4"
+name = "triply"
+version = "4.0.0"
 description = "Gyroid and lattice design utilities: field generation, mesh processing, STL/INP I/O, and simulation helpers."
 authors = [
     { name = "Corentin Foucher", email = "corentin.foucher@empa.ch" }
@@ -83,17 +83,17 @@ gpu = [
 
 
 [project.urls]
-Homepage = "https://github.com/your-account/gyroids"
-Documentation = "https://github.com/your-account/gyroids"
-Source = "https://github.com/your-account/gyroids"
-Issues = "https://github.com/your-account/gyroids/issues"
+Homepage = "https://github.com/co-foucher/triply"
+Documentation = "https://github.com/co-foucher/triply"
+Source = "https://github.com/co-foucher/triply"
+Issues = "https://github.com/co-foucher/triply/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["gyroid_utils*"]
+include = ["triply*"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

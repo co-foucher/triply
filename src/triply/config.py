@@ -1,7 +1,7 @@
 """
 ============================================================================
 CONFIG
-Configuration constants and tolerances used across gyroid_utils.
+Configuration constants and tolerances used across triply.
 ============================================================================
 
 CONSTANTS

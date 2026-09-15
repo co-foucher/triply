@@ -1,7 +1,7 @@
 """
 Mesh an STL with fTetWild, then create/run an ABAQUS simulation from it.
 
-STATUS: scaffold. Wires the real gyroid_utils.TET_mesh_tools /
+STATUS: scaffold. Wires the real triply.TET_mesh_tools /
 abaqus_tools calls into the UI with a minimal set of parameters (matching
 examples/generate_frequency_sim.py and notebooks/full simulation
 workflow.ipynb) - extend the forms below as more simulation types/options
@@ -19,12 +19,12 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Simulation", layout="wide")
 
-# Heavy imports (meshio/mesh/vtk/plotly stack via gyroid_utils) live behind
+# Heavy imports (meshio/mesh/vtk/plotly stack via triply) live behind
 # a spinner so the page shows something immediately instead of appearing
 # frozen on first load. Cached after the first import - see
-# src/gyroid_utils/__init__.py.
-with st.spinner("Loading GYROIDS toolkit..."):
-    from gyroid_utils import TET_mesh_tools, abaqus_tools
+# src/triply/__init__.py.
+with st.spinner("Loading triply toolkit..."):
+    from triply import TET_mesh_tools, abaqus_tools
 
     from app.state import init_state, get_output_dir
     from app.components.jobs import start_job, render_job_status
@@ -104,7 +104,7 @@ st.divider()
 # ==================== create ABAQUS simulation ========================
 # ======================================================================
 # those are the built-in simulation scripts that can be selected from the dropdown menu.
-# they are stored in the gyroid_utils/pybaqus folder.
+# they are stored in the triply/pybaqus folder.
 
 BUILTIN_SIM = {
     "Frequency analysis": "generate_frequency_sim.py",

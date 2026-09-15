@@ -3,7 +3,7 @@ Shared st.session_state helpers used across app/Home.py and app/pages/*.
 
 Kept deliberately small: this is just the session-state wiring (current
 model, output directory, background jobs registry), not pipeline logic -
-that stays in gyroid_utils.
+that stays in triply.
 """
 from pathlib import Path
 

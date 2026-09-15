@@ -4,7 +4,7 @@ from typing import Optional, Union
 import numpy as np
 import streamlit as st
 
-from gyroid_utils.TPMS_classes.tpms_custom import CustomTPMSModel
+from triply.TPMS_classes.tpms_custom import CustomTPMSModel
 from app.components.equation_input import evaluate_custom_inputs, EquationError
 from app.components.file_picker import browse_file
 from app.components.import_TPMS_files import import_matrix_from_file
@@ -77,7 +77,7 @@ def _adapt_resolution(field:np.ndarray, params) -> np.ndarray:
         The array resampled to (params.resolution,) * 3.
     """
     st.warning(f"Imported field shape {field.shape} does not match the expected resolution ({params.resolution}, {params.resolution}, {params.resolution}). Field will be resampled to the requested resolution.")
-    from gyroid_utils import voxel_tools
+    from triply import voxel_tools
     field = voxel_tools.interpolate_voxel_grid(field, params.resolution, params.resolution, params.resolution)
     return field
 

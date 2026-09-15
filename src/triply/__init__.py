@@ -1,7 +1,7 @@
 """
 ============================================================================
 __INIT__
-Package entry point for gyroid_utils.
+Package entry point for triply.
 
 Importing this package is cheap: heavy submodules (mesh processing,
 visualization, CT/imaging, simulation helpers, TPMS surface classes) are
@@ -10,17 +10,17 @@ access, via module-level __getattr__ (PEP 562, Python >= 3.7).
 
 Why: several of these submodules pull in slow-to-import native/scientific
 libraries at their own top level (vtk, trimesh, pymeshfix, scikit-image,
-plotly, SimpleITK, matplotlib...). Before this change, `import gyroid_utils`
+plotly, SimpleITK, matplotlib...). Before this change, `import triply`
 paid for ALL of them unconditionally - including the GUI (app/), where
-every single Streamlit page imports gyroid_utils just to reach the shared
+every single Streamlit page imports triply just to reach the shared
 logger, so e.g. the Home page (which uses none of this) was still paying
 the full cost of SimpleITK/vtk/matplotlib on every first load.
 
-This is transparent to existing call sites: `import gyroid_utils` followed
-by `gyroid_utils.mesh_tools.foo(...)` (the pattern used throughout the
-notebooks and gyroid_utils.utils.reload_all()) keeps working exactly as
+This is transparent to existing call sites: `import triply` followed
+by `triply.mesh_tools.foo(...)` (the pattern used throughout the
+notebooks and triply.utils.reload_all()) keeps working exactly as
 written. The only difference is *when* mesh_tools actually gets imported -
-on that first `.mesh_tools` access rather than at `import gyroid_utils`
+on that first `.mesh_tools` access rather than at `import triply`
 time - and it's cached after that, so later accesses are a plain,
 instant attribute lookup.
 ============================================================================
@@ -32,15 +32,15 @@ import importlib
 from importlib.metadata import version, PackageNotFoundError
 
 try:
-    __version__ = version("gyroid-utils")   # pip distribution name
+    __version__ = version("triply")   # pip distribution name
 except PackageNotFoundError:
     __version__ = "unknown"
 
 # Optionally print or log version
-print(f"[gyroid_utils] version {__version__} loaded")
+print(f"[triply] version {__version__} loaded")
 
 # logger.py has zero heavy dependencies (just stdlib `logging`), and a lot
-# of code assumes gyroid_utils.logger / gyroid_utils.set_log_level are just
+# of code assumes triply.logger / triply.set_log_level are just
 # there - so these stay normal eager imports, not lazy.
 from .logger import logger, set_log_level
 
@@ -59,8 +59,8 @@ _LAZY_SUBMODULES = {
     "config": ".config",
     "TPMS_classes": ".TPMS_classes",
     # Individual TPMS surface modules, re-bound at the top level (as before)
-    # so `gyroid_utils.tpms_gyroid` etc. keeps working without having to go
-    # through `gyroid_utils.TPMS_classes` explicitly.
+    # so `triply.tpms_gyroid` etc. keeps working without having to go
+    # through `triply.TPMS_classes` explicitly.
     "tpms_base": ".TPMS_classes.tpms_base",
     "tpms_gyroid": ".TPMS_classes.tpms_gyroid",
     "tpms_schwartzp": ".TPMS_classes.tpms_schwartzp",

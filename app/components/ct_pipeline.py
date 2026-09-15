@@ -1,6 +1,6 @@
 """
 Ordered, reorderable processing pipeline for a loaded CT volume, built on
-top of gyroid_utils.CT_scans's individual filter functions (threshold,
+top of triply.CT_scans's individual filter functions (threshold,
 dilate, erode, crop, connected-component, hole/island finding). Kept in
 its own component (rather than inline in app/pages/3_CT_Analysis.py) so
 that page stays focused on load/convert/preview; this file owns
@@ -32,7 +32,7 @@ DESIGN
   shape still holds.
 - Turning the pipeline result into a 3D mesh lives in
   app/pages/3_CT_Analysis.py, not here - see the "Generate 3D mesh"
-  section there, which calls gyroid_utils.mesh_tools.mesh_from_matrix
+  section there, which calls triply.mesh_tools.mesh_from_matrix
   directly on this module's returned result.
 - The overview list (_render_step_list) shows "Crop"'s resulting shape
   by tracking a running (Z, Y, X) shape through the step list and
@@ -50,7 +50,7 @@ import plotly.graph_objects as go
 import SimpleITK as sitk
 import streamlit as st
 
-from gyroid_utils import CT_scans
+from triply import CT_scans
 from app.state import get_output_dir
 from app.components.ct_viewer_launcher import render_lightweight_toggle, launch_ct_viewer
 

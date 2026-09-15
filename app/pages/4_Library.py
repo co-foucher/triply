@@ -2,7 +2,7 @@
 Library: browse previously generated TPMS structures (.stl + .html preview
 pairs) saved in the current output folder.
 
-STATUS: scaffold - a plain file browser, no gyroid_utils calls needed.
+STATUS: scaffold - a plain file browser, no triply calls needed.
 """
 import sys
 from pathlib import Path

@@ -3,7 +3,7 @@ import streamlit as st
 import time
 from pathlib import Path
 from typing import Callable, List, Optional
-from gyroid_utils import TET_mesh_tools, abaqus_tools
+from triply import TET_mesh_tools, abaqus_tools
 
 from app.components.jobs import Job
 

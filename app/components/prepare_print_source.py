@@ -2,7 +2,7 @@ import numpy as np
 import streamlit as st
 from plotly.colors import sample_colorscale
 
-from gyroid_utils import voxel_tools
+from triply import voxel_tools
 
 # label -> description for detect_overhangs' 0/1/2/3/4 output (see its
 # RETURNS docstring). Order matters: index i's color comes from sampling
@@ -36,7 +36,7 @@ def detect_overhangs(geometry_matrix: np.ndarray,
     ============================================================================
     1) DETECT_OVERHANGS
     Detects overhangs in a voxelized geometry and optionally adds support
-    voxels, by delegating to gyroid_utils.voxel_tools.detect_overhangs.
+    voxels, by delegating to triply.voxel_tools.detect_overhangs.
     ============================================================================
 
     PARAMETERS
@@ -109,7 +109,7 @@ def minimize_overhangs(geometry_matrix: np.ndarray,
     ============================================================================
     3) MINIMIZE_OVERHANGS
     Finds the best print orientation to minimize overhangs, via
-    gyroid_utils.voxel_tools.find_optimal_orientation, and rotates the
+    triply.voxel_tools.find_optimal_orientation, and rotates the
     mesh vertices to match.
     ============================================================================
 
@@ -151,7 +151,7 @@ def minimize_overhangs(geometry_matrix: np.ndarray,
                                                                                                    grid_sample_factor = 1,
                                                                                                    generate_supports=True, 
                                                                                                    give_rotation_matrix=True)
-    from gyroid_utils import mesh_tools
+    from triply import mesh_tools
     verts = mesh_tools.rotate_STL(verts =verts, rotation = rotation_matrix)
     return best_print_matrix, new_x, new_y, new_z, verts
 

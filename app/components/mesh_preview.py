@@ -2,7 +2,7 @@ from typing import Optional
 
 import streamlit as st
 
-from gyroid_utils import viz
+from triply import viz
 
 # Display label -> build_mesh_figure() boolean flag name. Only one of the
 # four flags is ever True at a time (mirrors build_mesh_figure's own

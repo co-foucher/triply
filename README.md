@@ -1,6 +1,8 @@
-# **GYROIDS UTILS**
+# **triply**
 
-  This is a small library to support the development of TPMS structures. It is developed around three use cases, and its structure is shown below
+  *Formerly `gyroid_utils` (repo `GYROIDS`), renamed in v4.0.0: replace `import gyroid_utils` with `import triply`.*
+
+  This is a small library to support the development of TPMS structures. Its Streamlit GUI is called **coroforge**. It is developed around three use cases, and its structure is shown below
 
  <img width="1531" height="865" alt="image" src="https://github.com/user-attachments/assets/2d937bd7-631f-4cb0-888b-6f7126523808" />
 
@@ -11,14 +13,14 @@
 # **INSTALLATION**
 ## Core dependencies
   - Use pip to install only this library and its dependencies. 
-  - It is better to first create a python 3.10 venv and then use pip install git+https://github.com/co-foucher/GYROIDS.git
+  - It is better to first create a python 3.10 venv and then use pip install git+https://github.com/co-foucher/triply.git
 
 ```powershell
       conda create -n nameofenv python=3.10
       conda install git
-      pip install git+https://github.com/co-foucher/GYROIDS.git
+      pip install git+https://github.com/co-foucher/triply.git
 ```
-  - For changes: update the toml file and then use pip install git+https://github.com/co-foucher/GYROIDS.git
+  - For changes: update the toml file and then use pip install git+https://github.com/co-foucher/triply.git
 
 ## GUI optional dependency
   - The GUI is optional, thus needs to be specifically named when installing
@@ -26,7 +28,7 @@
 ```powershell
       conda create -n nameofenv python=3.10
       conda install git
-      pip install "gyroid_utils[gui] @ git+https://github.com/co-foucher/GYROIDS.git"
+      pip install "triply[gui] @ git+https://github.com/co-foucher/triply.git"
 ```
 
 ## CUDA accelerated marching cube optional dependency
@@ -38,7 +40,7 @@
       conda create -n nameofenv python=3.10
       conda install git
       pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu132
-      pip install "gyroid_utils[gpu] @ git+https://github.com/co-foucher/GYROIDS.git"
+      pip install "triply[gpu] @ git+https://github.com/co-foucher/triply.git"
 ```
 
 ## local installation
@@ -53,7 +55,7 @@
 ```
 
 # Launching the App (GUI)
-There is a small [Streamlit](https://streamlit.io) front end (`app/`) over the library — forms/wiring around the existing TPMS / mesh / simulation / CT functions, no pipeline logic of its own.
+There is a small [Streamlit](https://streamlit.io) front end, **coroforge** (`app/`), over the library — forms/wiring around the existing TPMS / mesh / simulation / CT functions, no pipeline logic of its own.
 
   - First install the `gui` extra (see **GUI optional dependency** above).
   - Then, from the repo root, run:
@@ -66,8 +68,8 @@ There is a small [Streamlit](https://streamlit.io) front end (`app/`) over the l
 
 Pages (in the sidebar):
 - **Generate TPMS**: built-in surfaces or a custom equation, live preview, export STL — fully functional
-- **Simulation**: mesh an STL with fTetWild and launch ABAQUS batches — wired to the real `gyroid_utils` calls, but minimal parameter coverage
-- **CT Analysis**: convert/inspect CT volumes — wired to the real `gyroid_utils` calls, but minimal parameter coverage
+- **Simulation**: mesh an STL with fTetWild and launch ABAQUS batches — wired to the real `triply` calls, but minimal parameter coverage
+- **CT Analysis**: convert/inspect CT volumes — wired to the real `triply` calls, but minimal parameter coverage
 - **Library**: browse previously generated structures — a simple file browser over the output folder
 
 The output folder (where generated `.stl`/`.html`/`.npz` files are written and read from) can be changed from the sidebar; it defaults to `app/gui_outputs/`.
@@ -83,7 +85,7 @@ This is used to generate TPMS structures (especially gyroids) using the general 
 <img width="1894" height="921" alt="image" src="https://github.com/user-attachments/assets/c65cae60-cd07-47e0-a794-d1a3a486b6e0" />
 note that it was originaly designed for creating gyroid, but not limited to them.
 
-All TPMS model code now lives under the **`TPMS_classes/`** subpackage (`src/gyroid_utils/TPMS_classes/`), which re-exports everything so `from gyroid_utils.TPMS_classes import GyroidModel` (etc.) works without reaching into individual files.
+All TPMS model code now lives under the **`TPMS_classes/`** subpackage (`src/triply/TPMS_classes/`), which re-exports everything so `from triply.TPMS_classes import GyroidModel` (etc.) works without reaching into individual files.
 
 Scripts related to this use case:
 - **TPMS_classes/tpms_base.py**: Shared `TPMSModel` base class — field computation, meshing, export, previews, quality checks, and baseplates. Every TPMS type is a thin subclass that only supplies its implicit surface equation.
@@ -196,7 +198,7 @@ The `GyroidModel` class is the main entry point for gyroid generation. The typic
 
 ```python
 import numpy as np
-from gyroid_utils.TPMS_classes import GyroidModel
+from triply.TPMS_classes import GyroidModel
 
 # Create a 64×64×64 grid
 x, y, z = np.meshgrid(np.linspace(0,1,64),
@@ -222,7 +224,7 @@ model.export_stl("my_gyroid.stl")
 model.save("gyroid_data.npz")  # Save field for later
 ```
 
-Any other TPMS type works the same way — just import a different class, e.g. `from gyroid_utils.TPMS_classes import DiamondModel`.
+Any other TPMS type works the same way — just import a different class, e.g. `from triply.TPMS_classes import DiamondModel`.
 
 ### All-in-One Function
 
@@ -230,7 +232,7 @@ For a quicker workflow, use `create_a_gyroid()`:
 
 ```python
 import numpy as np
-from gyroid_utils.TPMS_classes import create_a_gyroid
+from triply.TPMS_classes import create_a_gyroid
 
 x, y, z = np.meshgrid(np.linspace(0,10,128),
                       np.linspace(0,10,128),
@@ -247,15 +249,15 @@ create_a_gyroid(
 )
 ```
 
-For more detailed API documentation and parameters, see [tpms_base.py](src/gyroid_utils/TPMS_classes/tpms_base.py) (shared pipeline) and [tpms_gyroid.py](src/gyroid_utils/TPMS_classes/tpms_gyroid.py) (gyroid-specific equation), or check out the example notebooks.
+For more detailed API documentation and parameters, see [tpms_base.py](src/triply/TPMS_classes/tpms_base.py) (shared pipeline) and [tpms_gyroid.py](src/triply/TPMS_classes/tpms_gyroid.py) (gyroid-specific equation), or check out the example notebooks.
 
 
 # Logging
 Control logging verbosity:
 
 ```python
-import gyroid_utils
-gyroid_utils.set_log_level("DEBUG")  # or "INFO", "WARNING", "ERROR", "CRITICAL"
+import triply
+triply.set_log_level("DEBUG")  # or "INFO", "WARNING", "ERROR", "CRITICAL"
 ```
 
 # License

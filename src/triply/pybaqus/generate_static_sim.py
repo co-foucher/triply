@@ -21,7 +21,7 @@
 #                 (Abaqus applies a ConcentratedForce to *each* node of the
 #                 set, so the magnitude has to be divided up front).
 #
-# Run by gyroid_utils.abaqus_tools.create_simulation(); every parameter
+# Run by triply.abaqus_tools.create_simulation(); every parameter
 # arrives as a key=value argument after the `--` separator.
 # ============================================================================
 

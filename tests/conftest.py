@@ -1,5 +1,5 @@
 """
-Shared pytest fixtures for the gyroid_utils test suite.
+Shared pytest fixtures for the triply test suite.
 """
 import numpy as np
 import pytest

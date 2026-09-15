@@ -10,8 +10,8 @@ import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
-from gyroid_utils import viz
-from gyroid_utils.logger import logger
+from triply import viz
+from triply.logger import logger
 
 
 """

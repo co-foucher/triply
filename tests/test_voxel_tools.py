@@ -1,11 +1,11 @@
 """
-Tests for gyroid_utils.voxel_tools.
+Tests for triply.voxel_tools.
 """
 import numpy as np
 import pytest
 
-#this is just like the import in gyroid_utils.voxel_tools, but we do it here so that pytest can skip all tests in this module if gyroid_utils isn't importable
-voxel_tools = pytest.importorskip("gyroid_utils.voxel_tools")
+#this is just like the import in triply.voxel_tools, but we do it here so that pytest can skip all tests in this module if triply isn't importable
+voxel_tools = pytest.importorskip("triply.voxel_tools")
 
 """
 ============================================================================

@@ -1,5 +1,5 @@
 """
-Tests for gyroid_utils.tpms_base.TPMSModel.
+Tests for triply.tpms_base.TPMSModel.
 
 TPMSModel is the shared base class behind every concrete TPMS type
 (GyroidModel, SchwartzPModel, DiamondModel, IWPModel, ...). Validation, the
@@ -12,8 +12,8 @@ implicit-equation formula is tested separately in test_tpms_surfaces.py.
 import numpy as np
 import pytest
 
-#this is just like the import in gyroid_utils.tpms_base, but we do it here so that pytest can skip all tests in this module if gyroid_utils isn't importable
-tpms_base = pytest.importorskip("gyroid_utils.TPMS_classes.tpms_base")
+#this is just like the import in triply.tpms_base, but we do it here so that pytest can skip all tests in this module if triply isn't importable
+tpms_base = pytest.importorskip("triply.TPMS_classes.tpms_base")
 TPMSModel = tpms_base.TPMSModel
 
 """

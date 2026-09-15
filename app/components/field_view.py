@@ -3,7 +3,7 @@
 3D mesh preview so the field can be sanity-checked before/alongside the
 extracted surface.
 
-Delegates entirely to gyroid_utils.viz.twod_view_of_matrix(show=False),
+Delegates entirely to triply.viz.twod_view_of_matrix(show=False),
 which now returns the Plotly figure instead of always calling fig.show()
 (fig.show() pops open a separate browser tab/window, which isn't
 embeddable in a Streamlit page - see the `show` parameter added to that
@@ -19,7 +19,7 @@ import numpy as np
 import streamlit as st
 from scipy.ndimage import uniform_filter1d
 
-from gyroid_utils import viz
+from triply import viz
 
 # Total pixel budget for the WHOLE animation (all shown Z-frames combined),
 _PREVIEW_PIXEL_BUDGET = 4_000_000

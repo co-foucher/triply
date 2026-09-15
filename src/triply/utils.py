@@ -1,5 +1,5 @@
 """
-gyroid_utils
+triply
 ============
 
 just some low-level helpers
@@ -25,7 +25,7 @@ def reload_all():
     """
     ============================================================================
     1) RELOAD_ALL
-    Reloads every gyroid_utils submodule, useful for interactive development
+    Reloads every triply submodule, useful for interactive development
     (e.g. in a Jupyter notebook) after editing the source without restarting
     the kernel.
     ============================================================================
@@ -40,29 +40,29 @@ def reload_all():
 
     EXAMPLE
     -------
-    >>> import gyroid_utils
-    >>> gyroid_utils.reload_all()
+    >>> import triply
+    >>> triply.reload_all()
     """
     import importlib
-    import gyroid_utils
+    import triply
 
     modules = [
-        gyroid_utils,
-        gyroid_utils.mesh_tools,
-        gyroid_utils.viz,
-        gyroid_utils.utils,
-        gyroid_utils.io_ops,
-        gyroid_utils.config,
-        gyroid_utils.abaqus_tools,
-        gyroid_utils.TET_mesh_tools,
-        gyroid_utils.voxel_tools,
-        gyroid_utils.CT_scans,
-        gyroid_utils.CT_visualization_window,
+        triply,
+        triply.mesh_tools,
+        triply.viz,
+        triply.utils,
+        triply.io_ops,
+        triply.config,
+        triply.abaqus_tools,
+        triply.TET_mesh_tools,
+        triply.voxel_tools,
+        triply.CT_scans,
+        triply.CT_visualization_window,
     ]
 
     for m in modules:
         importlib.reload(m)
-    print("gyroid_utils: all modules reloaded")
+    print("triply: all modules reloaded")
 
 
 # =====================================================================
@@ -72,7 +72,7 @@ def help():
     """
     ============================================================================
     2) HELP
-    Displays help information about the gyroid_utils package.
+    Displays help information about the triply package.
     ============================================================================
 
     PARAMETERS
@@ -85,12 +85,12 @@ def help():
 
     EXAMPLE
     -------
-    >>> import gyroid_utils
-    >>> gyroid_utils.help()
+    >>> import triply
+    >>> triply.help()
     """
     help_text = """
-    Gyroid Utils Package
-    ====================
+    triply Package
+    ==============
 
     Available modules:
     - mesh_tools: Functions for mesh operations
@@ -99,7 +99,7 @@ def help():
     - gyroid: Main gyroid generation functions
 
      Example usage:
-           from gyroid_utils.gyroid import GyroidModel
+           from triply.gyroid import GyroidModel
            x, y, z = np.meshgrid(np.linspace(0,1,64),
                       np.linspace(0,1,64),
                       np.linspace(0,1,64), indexing='ij')

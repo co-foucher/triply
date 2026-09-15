@@ -1,10 +1,10 @@
 """
-GYROIDS GUI - entry point.
+coroforge GUI - entry point.
 
 Run with (from the repo root, after `pip install -e ".[gui]"`):
     streamlit run app/Home.py
 
-This is a thin front end over the gyroid_utils library (src/gyroid_utils):
+This is a thin front end over the triply library (src/triply):
 it implements no pipeline logic itself, only forms/wiring around the
 existing TPMS / mesh / simulation / CT functions. See each page for its
 current status.
@@ -26,7 +26,7 @@ import streamlit as st
 
 from app.state import init_state
 
-st.set_page_config(page_title="GYROIDS", page_icon=":ice_cube:", layout="wide")
+st.set_page_config(page_title="coroforge", page_icon=":ice_cube:", layout="wide")
 init_state()
 
 # ============================================================
@@ -101,7 +101,7 @@ PAGES = [
 # needing to know which one is active. Grey nodes are not pages - they are
 # the files the pages hand to each other.
 _PIPELINE_DOT = """
-digraph gyroids {
+digraph coroforge {
     rankdir=LR;
     bgcolor="transparent";
     pad=0.15;
@@ -155,9 +155,9 @@ def _render_page_cards(row: int) -> None:
 # ============================================================
 # ===================== Start Page ===========================
 # ============================================================
-st.title("GYROIDS")
+st.title("coroforge")
 st.write(
-    "GUI front end for the gyroid_utils pipeline. Each page in the sidebar "
+    "GUI front end for the triply pipeline. Each page in the sidebar "
     "is one stage of the workflow, and they chain together through files in "
     "the output folder: an `.stl` exported on one page is what the next one "
     "asks you to select."

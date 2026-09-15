@@ -1,11 +1,11 @@
 """
-Tests for gyroid_utils.mesh_tools.
+Tests for triply.mesh_tools.
 """
 import numpy as np
 import pytest
 
-#this is just like the import in gyroid_utils.mesh_tools, but we do it here so that pytest can skip all tests in this module if gyroid_utils isn't importable
-mesh_tools = pytest.importorskip("gyroid_utils.mesh_tools")
+#this is just like the import in triply.mesh_tools, but we do it here so that pytest can skip all tests in this module if triply isn't importable
+mesh_tools = pytest.importorskip("triply.mesh_tools")
 
 """
 ============================================================================
@@ -245,7 +245,7 @@ class TestMatrixFromMesh:
     """
     Tests for mesh_tools.matrix_from_mesh(), the voxelization function that
     inverts mesh_from_matrix()'s marching-cubes extraction. Together the two
-    functions form a full loop between the two representations gyroid_utils
+    functions form a full loop between the two representations triply
     works with: matrix -> mesh (mesh_from_matrix) -> matrix (matrix_from_mesh).
     The main test here exercises that full loop end-to-end - build a
     scalar field, extract its mesh, voxelize the mesh back into a matrix -

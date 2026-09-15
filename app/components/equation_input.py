@@ -2,7 +2,7 @@
 Custom TPMS equation support: parsing/validation/evaluation of user-typed
 formula strings, the Streamlit widgets that collect them, and the one call
 site (evaluate_custom_inputs) that turns them into the plain numpy arrays
-gyroid_utils.TPMS_classes.tpms_custom.CustomTPMSModel expects. Used by
+triply.TPMS_classes.tpms_custom.CustomTPMSModel expects. Used by
 app/pages/1_Generate_TPMS.py.
 
 WHY THIS LIVES HERE, NOT IN THE LIBRARY

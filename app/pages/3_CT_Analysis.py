@@ -2,7 +2,7 @@
 CT scan conversion + a static preview.
 
 STATUS: scaffold. Deliberately does NOT rebuild the existing interactive
-slice-scrubbing viewer (gyroid_utils.CT_visualization_window) in the
+slice-scrubbing viewer (triply.CT_visualization_window) in the
 browser: that viewer's scroll-to-scrub / click-to-inspect interactions
 don't translate well to Streamlit's rerun-per-widget-interaction model.
 Instead this page handles conversion + a simple static slice preview, and
@@ -20,13 +20,13 @@ st.set_page_config(page_title="CT Analysis", layout="wide")
 # Heavy imports (SimpleITK/vtk/mesh/plotly stack) live behind a spinner so
 # the page shows something immediately instead of appearing frozen on
 # first load. Cached after the first import - see
-# src/gyroid_utils/__init__.py.
-with st.spinner("Loading GYROIDS toolkit..."):
+# src/triply/__init__.py.
+with st.spinner("Loading triply toolkit..."):
     import numpy as np
     import plotly.graph_objects as go
     import SimpleITK as sitk
 
-    from gyroid_utils import CT_scans, mesh_tools
+    from triply import CT_scans, mesh_tools
 
     from app.state import init_state, get_output_dir
     from app.components.file_picker import browse_file, browse_directory

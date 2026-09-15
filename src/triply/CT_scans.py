@@ -7,7 +7,7 @@ import SimpleITK as sitk
 import tifffile as tiff
 from PIL import Image as PILImage
 from .CT_visualization_window import open_window, lightweigth_open
-#from gyroid_utils import CT_visualization_window
+#from triply import CT_visualization_window
 
 
 """

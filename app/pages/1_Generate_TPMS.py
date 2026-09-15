@@ -21,11 +21,11 @@ import streamlit as st
 st.set_page_config(page_title="Generate TPMS", layout="wide")
 
 # Heavy imports (mesh/vtk/plotly/sympy stack, pulled in transitively via
-# gyroid_utils.TPMS_classes) live behind a spinner so the page shows
+# triply.TPMS_classes) live behind a spinner so the page shows
 # something immediately instead of appearing frozen on first load. Cached
-# after the first import - see src/gyroid_utils/__init__.py.
-with st.spinner("Loading GYROIDS toolkit..."):
-    from gyroid_utils.TPMS_classes import (
+# after the first import - see src/triply/__init__.py.
+with st.spinner("Loading triply toolkit..."):
+    from triply.TPMS_classes import (
         GyroidModel, SchwartzPModel, DiamondModel, IWPModel, NeoviusModel,
         FischerKochSModel, FRDModel, LidinoidModel, SplitPModel,
     )
@@ -224,7 +224,7 @@ def _make_user_define_parameters(params: TPMSParams):
             params.geometry_verts = None
             params.geometry_faces = None
         elif '.stl' in st.session_state["combined_geometry_path"]:
-            from gyroid_utils.mesh_tools import matrix_from_mesh
+            from triply.mesh_tools import matrix_from_mesh
             params.geometry_verts, params.geometry_faces = load_STL(st.session_state["combined_geometry_path"])
             _,_,_, params.geometry = matrix_from_mesh(params.geometry_verts, params.geometry_faces, params.resolution)
             params.geometry = pad_to_square(params.geometry)

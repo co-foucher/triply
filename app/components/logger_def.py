@@ -1,6 +1,6 @@
 
 import streamlit as st
-from gyroid_utils.logger import logger
+from triply.logger import logger
 
 @st.fragment
 def set_log_level():

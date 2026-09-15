@@ -19,13 +19,13 @@ import numpy as np
 
 st.set_page_config(page_title="Prepare Print", layout="wide")
 
-# Heavy imports (mesh/vtk/plotly stack via gyroid_utils) live behind a
+# Heavy imports (mesh/vtk/plotly stack via triply) live behind a
 # spinner so the page shows something immediately instead of appearing
 # frozen on first load. Cached after the first import - see
-# src/gyroid_utils/__init__.py.
-with st.spinner("Loading GYROIDS toolkit..."):
-    from gyroid_utils import voxel_tools, viz
-    from gyroid_utils.mesh_tools import matrix_from_mesh, mesh_from_matrix, export_as_STL
+# src/triply/__init__.py.
+with st.spinner("Loading triply toolkit..."):
+    from triply import voxel_tools, viz
+    from triply.mesh_tools import matrix_from_mesh, mesh_from_matrix, export_as_STL
     from app.state import init_state, get_output_dir
     from app.components.tpms_source_panel import load_STL
     from app.components.file_picker import browse_file

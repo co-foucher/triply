@@ -7,7 +7,7 @@ WHY THIS EXISTS
 Streamlit reruns the entire script top-to-bottom on every widget
 interaction and blocks the UI while a script run is in progress. The
 simulation pipeline shells out to external, long-running processes
-(fTetWild, ABAQUS - see gyroid_utils.TET_mesh_tools / abaqus_tools), so
+(fTetWild, ABAQUS - see triply.TET_mesh_tools / abaqus_tools), so
 calling them directly from a button handler would freeze the app for the
 duration of the run. Instead, `start_job` runs the work in a background
 thread and stores its live status/log in st.session_state.
