@@ -25,8 +25,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import streamlit as st
 
 from app.state import init_state
+from app.components.branding import PAGE_ICON, LOGO_FULL
 
-st.set_page_config(page_title="coroforge", page_icon=":ice_cube:", layout="wide")
+st.set_page_config(page_title="coroforge", page_icon=PAGE_ICON, layout="wide")
 init_state()
 
 # ============================================================
@@ -155,7 +156,8 @@ def _render_page_cards(row: int) -> None:
 # ============================================================
 # ===================== Start Page ===========================
 # ============================================================
-st.title("coroforge")
+# 642 px = 3 screen px per logo pixel, so the pixel art stays crisp.
+st.image(LOGO_FULL, width=642)
 st.write(
     "GUI front end for the triply pipeline. Each page in the sidebar "
     "is one stage of the workflow, and they chain together through files in "

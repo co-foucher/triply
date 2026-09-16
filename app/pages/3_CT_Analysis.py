@@ -15,7 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import streamlit as st
 
-st.set_page_config(page_title="CT Analysis", layout="wide")
+from app.components.branding import PAGE_ICON
+
+st.set_page_config(page_title="CT Analysis", page_icon=PAGE_ICON, layout="wide")
 
 # Heavy imports (SimpleITK/vtk/mesh/plotly stack) live behind a spinner so
 # the page shows something immediately instead of appearing frozen on

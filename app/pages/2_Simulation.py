@@ -17,7 +17,9 @@ import shutil
 import pandas as pd
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Simulation", layout="wide")
+from app.components.branding import PAGE_ICON
+
+st.set_page_config(page_title="Simulation", page_icon=PAGE_ICON, layout="wide")
 
 # Heavy imports (meshio/mesh/vtk/plotly stack via triply) live behind
 # a spinner so the page shows something immediately instead of appearing

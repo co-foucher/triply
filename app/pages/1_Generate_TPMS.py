@@ -18,7 +18,9 @@ from typing import Optional, Union
 import numpy as np
 import streamlit as st
 
-st.set_page_config(page_title="Generate TPMS", layout="wide")
+from app.components.branding import PAGE_ICON
+
+st.set_page_config(page_title="Generate TPMS", page_icon=PAGE_ICON, layout="wide")
 
 # Heavy imports (mesh/vtk/plotly/sympy stack, pulled in transitively via
 # triply.TPMS_classes) live behind a spinner so the page shows

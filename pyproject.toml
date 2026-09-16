@@ -68,14 +68,19 @@ gui = [
     "sympy==1.14.0",
 ]
 
+# gpu extra DISABLED (2026-09-16): uv resolves every extra when it builds
+# uv.lock, and cumcubes' setup.py imports torch before torch is installed,
+# so this extra made `uv run` (and launcher.bat) fail for everyone, GPU or not.
+# To try it manually: pip install torch ninja, then
+#   pip install --no-build-isolation git+https://github.com/lzhnb/CuMCubes.git
 # Optional CUDA-accelerated marching cubes backend for mesh_tools.mesh_from_matrix()
 # Kept out of core dependencies since it requires a CUDA-capable GPU.
 # IT IS NOT WORKING (YET)
-gpu = [
-    "torch",
-    "ninja",
-    "cumcubes @ git+https://github.com/lzhnb/CuMCubes.git",
-]
+# gpu = [
+#     "torch",
+#     "ninja",
+#     "cumcubes @ git+https://github.com/lzhnb/CuMCubes.git",
+# ]
 
 
 [project.urls]
@@ -96,4 +101,7 @@ minversion = "7.0"
 testpaths = ["tests"]
 addopts = "-ra"
 
-
+[tool.uv]
+# PyQt5-Qt5 releases after 5.15.2 ship no Windows wheels. uv picks one version
+# for all platforms, so without this pin Windows installs fail.
+constraint-dependencies = ["pyqt5-qt5==5.15.2; sys_platform == 'win32'"]

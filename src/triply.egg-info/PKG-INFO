@@ -39,10 +39,6 @@ Requires-Dist: scipy==1.15.3
 Provides-Extra: gui
 Requires-Dist: streamlit==1.51.0; extra == "gui"
 Requires-Dist: sympy==1.14.0; extra == "gui"
-Provides-Extra: gpu
-Requires-Dist: torch; extra == "gpu"
-Requires-Dist: ninja; extra == "gpu"
-Requires-Dist: cumcubes @ git+https://github.com/lzhnb/CuMCubes.git ; extra == "gpu"
 
 # **triply**
 

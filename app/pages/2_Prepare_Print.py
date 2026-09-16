@@ -17,7 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import streamlit as st
 import numpy as np
 
-st.set_page_config(page_title="Prepare Print", layout="wide")
+from app.components.branding import PAGE_ICON
+
+st.set_page_config(page_title="Prepare Print", page_icon=PAGE_ICON, layout="wide")
 
 # Heavy imports (mesh/vtk/plotly stack via triply) live behind a
 # spinner so the page shows something immediately instead of appearing

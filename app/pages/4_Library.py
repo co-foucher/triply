@@ -12,8 +12,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from app.state import init_state, get_output_dir
+from app.components.branding import PAGE_ICON
 
-st.set_page_config(page_title="Library", layout="wide")
+st.set_page_config(page_title="Library", page_icon=PAGE_ICON, layout="wide")
 init_state()
 st.title("Library")
 

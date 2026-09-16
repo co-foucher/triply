@@ -9,6 +9,7 @@ from pathlib import Path
 
 import streamlit as st
 from app.components.logger_def import set_log_level
+from app.components.branding import render_sidebar_logo
 
 # Default folder for generated .npz/.stl/.html files. Overridable per
 # session from the sidebar (see init_state()). Lives inside app/ (this
@@ -26,6 +27,8 @@ def init_state() -> None:
     st.session_state.setdefault("current_model", None)      # last generated TPMSModel instance
     st.session_state.setdefault("current_equation", None)    # equation string, if a custom TPMS was used
     st.session_state.setdefault("jobs", {})                  # job_id -> app.jobs.Job
+
+    render_sidebar_logo()
 
     with st.sidebar:
         st.session_state["output_dir"] = st.text_input(
