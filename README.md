@@ -2,13 +2,15 @@
 
   *Formerly `gyroid_utils` (repo `GYROIDS`), renamed in v4.0.0: replace `import gyroid_utils` with `import triply`.*
 
-  This is a small library to support the development of TPMS structures. Its Streamlit GUI is called **coroforge**. It is developed around three use cases, and its structure is shown below
+  This is a small library to support the development of TPMS structures. Its Streamlit GUI is called **coroforge** (see [coroforge: the GUI](#coroforge-the-gui)). It is developed around three use cases, and its structure is shown below
 
  <img width="1531" height="865" alt="image" src="https://github.com/user-attachments/assets/2d937bd7-631f-4cb0-888b-6f7126523808" />
 
 
 # **REQUIREMENTS**
   !!!! requires Python 3.10 !!!!
+
+  If you only want the GUI on Windows, `launcher.bat` sets up Python 3.10 for you: see [Opening the GUI](#opening-the-gui).
 
 # **INSTALLATION**
 ## Core dependencies
@@ -33,14 +35,13 @@
 
 ## CUDA accelerated marching cube optional dependency
   - THIS IS NOT WORKING (YET)
-  - This is also optional, thus needs to be specifically named when installing
-  - You NEED to install torch previously
+  - The `gpu` extra is currently **disabled** in `pyproject.toml`: `cumcubes` needs torch already installed to build, which made `uv run` (and therefore `launcher.bat`) fail for everyone, GPU or not.
+  - To try it manually, in an environment where triply is already installed:
 
 ```powershell
-      conda create -n nameofenv python=3.10
-      conda install git
       pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu132
-      pip install "triply[gpu] @ git+https://github.com/co-foucher/triply.git"
+      pip install ninja
+      pip install --no-build-isolation git+https://github.com/lzhnb/CuMCubes.git
 ```
 
 ## local installation
@@ -54,25 +55,83 @@
   pip install -e ".[gui]"
 ```
 
-# Launching the App (GUI)
-There is a small [Streamlit](https://streamlit.io) front end, **coroforge** (`app/`), over the library — forms/wiring around the existing TPMS / mesh / simulation / CT functions, no pipeline logic of its own.
+# coroforge: the GUI
 
-  - First install the `gui` extra (see **GUI optional dependency** above).
-  - Then, from the repo root, run:
+<img src="app/assets/coroforge_logo.svg" alt="coroforge" width="560">
+
+**coroforge** is the [Streamlit](https://streamlit.io) app in `app/` that puts a point-and-click front end on triply. It has no pipeline logic of its own: every button calls the same TPMS / mesh / print / simulation / CT functions described in [Module Organization](#module-organization). It runs as a small local server on your own computer, and you use it in your web browser.
+
+## Opening the GUI
+
+### Option 1: double-click `launcher.bat` (Windows, no Python or terminal needed)
+1. Get the repository: on GitHub click **Code > Download ZIP** and extract it, or `git clone https://github.com/co-foucher/triply.git`.
+2. Double-click **`launcher.bat`** in the repository root.
+3. A console window opens, titled *coroforge - keep this window open while you use the app*. It:
+   - installs [uv](https://docs.astral.sh/uv/) for your user account if it is missing (no admin rights needed);
+   - pre-answers Streamlit's one-time "Email:" question, so the first launch does not sit silently waiting for keyboard input;
+   - runs `uv run --extra gui streamlit run app\Home.py`, which creates a `.venv` folder next to the launcher with Python 3.10 and the exact package versions pinned in `uv.lock`, then starts the app.
+4. The app opens in your browser at http://localhost:8501, on the **Home** page.
+
+Good to know:
+  - The **first launch downloads about 450 MB and can take several minutes**. Later launches start in seconds. An internet connection is needed the first time, and again whenever `pyproject.toml` or `uv.lock` change.
+  - **Keep the console window open** while you use the app: closing it stops the app. Closing the browser tab does not.
+  - If something goes wrong, the window stays open with a message: *uv could not be installed* means the internet connection or proxy blocked the download; *The app has stopped* means the reason is in the messages printed above it.
+
+### Option 2: from your own Python environment
+Install the `gui` extra (see [GUI optional dependency](#gui-optional-dependency)), then run from the repository root:
 
 ```powershell
       streamlit run app/Home.py
 ```
 
-  - This opens the app in your browser automatically (default: http://localhost:8501).
+or, if you use uv, without creating an environment yourself:
 
-Pages (in the sidebar):
-- **Generate TPMS**: built-in surfaces or a custom equation, live preview, export STL — fully functional
-- **Simulation**: mesh an STL with fTetWild and launch ABAQUS batches — wired to the real `triply` calls, but minimal parameter coverage
-- **CT Analysis**: convert/inspect CT volumes — wired to the real `triply` calls, but minimal parameter coverage
-- **Library**: browse previously generated structures — a simple file browser over the output folder
+```powershell
+      uv run --extra gui streamlit run app/Home.py
+```
 
-The output folder (where generated `.stl`/`.html`/`.npz` files are written and read from) can be changed from the sidebar; it defaults to `app/gui_outputs/`.
+  - The app opens at http://localhost:8501. If Streamlit asks for an email on its very first run, just press Enter.
+  - Stop the app with `Ctrl+C` in the terminal.
+
+## Using the GUI: start from the Home page
+The app opens on the **Home** page, which is the map of everything coroforge does. Each page in the sidebar is one stage of the workflow, and the pages chain together through files in the **output folder**: an `.stl` exported on one page is what the next one asks you to select.
+
+### How the pages fit together
+The Home page draws the workflow as a diagram:
+
+<img src="app/assets/home_pipeline_preview.png" alt="coroforge pages and the files they exchange" width="900">
+
+Coloured boxes are pages, grey ones are the files they hand to each other. The dashed edge is *Generate TPMS* reading a mesh or field back in, to gyroid-fill an existing part or to pick up where a previous export left off.
+
+### Pages
+Below the diagram, the Home page has one card per page: what it does, the files it reads (**in**) and the files it writes (**out**). Click a card's title, or the page name in the sidebar, to open it.
+
+| Page | What you can do | In | Out |
+|---|---|---|---|
+| **Generate TPMS** | Nine built-in surfaces or a custom equation, three density-field modes, baseplates and boolean combine, with live field and mesh previews. | nothing, or an `.stl` / `.npy` to combine | `.stl`, `.npy`, `.html` |
+| **Prepare print** | Voxelize a mesh, label its overhangs, bridges and needed supports, search the print orientation that needs the least of them, and export the mesh rotated into it. | `.stl` | `.stl`, `.html` |
+| **Simulation** | Tet-mesh with fTetWild, build and run an ABAQUS job (frequency or static stiffness), then pull the displacement fields back out. | `.stl` | `.inp`, `.odb`, `.csv` |
+| **CT Analysis** | Stack JPG / DICOM / TIFF slices into one volume, build a segmentation pipeline over it, and extract a mesh from the result. | image slices, or an existing `.mhd` | `.mhd`, `.stl` |
+| **Library** | Browse the output folder: preview each structure and download its mesh, its saved field files and its saved preview. | the output folder | downloads |
+
+### "How this works" panels
+Every page except the Library opens with a collapsed **How this works** panel that walks through its pipeline step by step, one column per section of the page. Start there if a parameter isn't obvious: the panels explain what each section is actually doing, not just what the widget is called.
+
+| Page | Pipeline explained in its panel |
+|---|---|
+| Generate TPMS | implicit field -> density field -> marching cubes |
+| Prepare print | voxelize -> overhang labels -> orientation search |
+| Simulation | STL -> tet mesh -> ABAQUS input -> results |
+| CT Analysis | slices -> volume -> mask -> mesh |
+
+### Sidebar (on every page)
+  - **Output folder**: where every page writes its files and reads them from. It defaults to `app/gui_outputs/` and is created if it doesn't exist. Change it to work in another folder; it applies to the current browser session, and the **Library** page lists whatever is in it.
+  - **Select Log Level**: how much of triply's own logging is printed in the console window (DEBUG, INFO, WARNING, ERROR, CRITICAL; default INFO).
+
+### What some pages need besides Python
+  - **Simulation** needs [fTetWild](https://github.com/wildmeshing/fTetWild) (the path to its executable is set on the page; default `C:\Program Files\fTetWild\build\Release\FloatTetwild_bin.exe`) and a local **ABAQUS** installation whose `abaqus` command works in a terminal. Meshing and ABAQUS runs happen in the background, and their status and log are shown on the page and refresh on their own.
+  - **CT Analysis** shows a static slice preview in the browser. Its full interactive viewer opens as a separate desktop window.
+  - The **Browse...** buttons open your operating system's own file and folder dialogs. This works because the app runs on your own computer.
 
 # Known Bugs
 Coordinates in the STL mesh do not match exactly the definition in the matrix. This is due to the marching cube algorithm, resulting in structure about a pixel larger in every dimension.
