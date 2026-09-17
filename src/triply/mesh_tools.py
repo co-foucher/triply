@@ -4,8 +4,7 @@ import trimesh # type: ignore
 from .logger import logger # type: ignore
 from stl import mesh as stl_mesh # type: ignore
 from skimage import measure # type: ignore
-import pymeshfix # type: ignore4
-import vtk
+#import pymeshfix # type: ignore4
 #import pyvista as pv # type: ignore
 
 
@@ -357,32 +356,6 @@ def export_as_STL(verts: np.ndarray, faces: np.ndarray, path: str):
 #=====================================================================
 #5) mesh_from_matrix
 #=====================================================================
-# Module-level cache: cheap probe for CUDA marching-cubes support, computed
-# once per process rather than on every mesh_from_matrix() call.
-_CUDA_MC_AVAILABLE = None
-
-
-def _cuda_backend_available() -> bool:
-    """
-    Checks (once, cached) whether torch + cumcubes + a CUDA device are all
-    available. Safe to call repeatedly - only pays the import/probe cost once.
-    """
-    global _CUDA_MC_AVAILABLE
-    if _CUDA_MC_AVAILABLE is None:
-        try:
-            import torch  # noqa: F401
-            import cumcubes  # noqa: F401
-            _CUDA_MC_AVAILABLE = torch.cuda.is_available()
-        except ImportError:
-            _CUDA_MC_AVAILABLE = False
-        logger.info(
-            f"CUDA marching cubes backend "
-            f"{'available' if _CUDA_MC_AVAILABLE else 'not available'} - "
-            f"'auto' will use {'cuda' if _CUDA_MC_AVAILABLE else 'skimage'}."
-        )
-    return _CUDA_MC_AVAILABLE
-
-
 def mesh_from_matrix(
     matrix: np.ndarray,
     iso_level: float,
@@ -392,7 +365,6 @@ def mesh_from_matrix(
     z: np.ndarray,
     pad_width: int = 5,
     pad_val: float = -1,
-    backend: str = "auto",
     ):
     """
     ============================================================================
@@ -411,10 +383,8 @@ def mesh_from_matrix(
     spacing : tuple(float, float, float)
         Voxel spacing (dx, dy, dz) in physical units.
     algo_step_size : int
-        Marching cubes step size (larger = faster, less detail). Used by
-        both backends: for "skimage" it's passed straight to
-        measure.marching_cubes; for "cuda" (which has no native step_size)
-        it's applied by strided-downsampling the volume before extraction.
+        Marching cubes step size (larger = faster, less detail), passed straight
+        to skimage.measure.marching_cubes.
     x, y, z : float, optional
         Physical coordinate of voxel (0,0,0) in the *un-padded* matrix.
     pad_width : int, optional
@@ -424,13 +394,6 @@ def mesh_from_matrix(
         iso_level relative to the data range (encourages "caps" on boundaries).
         If your "solid" is on the other side of the iso_level, you may want to
         pass a value safely below iso_level instead.
-    backend : str, optional
-        "auto" (default): use CUDA marching cubes (via cumcubes) if torch and
-        cumcubes are importable and a CUDA device is available, otherwise
-        fall back to skimage. "skimage": always use scikit-image's CPU
-        implementation (method='lewiner'). "cuda": force the CUDA
-        implementation; falls back to skimage with a warning if it fails
-        at runtime (e.g. out of GPU memory).
 
     RETURNS
     -------
@@ -456,24 +419,11 @@ def mesh_from_matrix(
                 logger.error("x, y, z must match the shape of matrix or be 1D arrays matching each dimension.")
                 logger.debug(f"x.shape: {x.shape}, y.shape: {y.shape}, z.shape: {z.shape}, matrix.shape: {matrix.shape}")
                 raise ValueError("x, y, z must match the shape of matrix or be 1D arrays matching each dimension.")
-
-    if backend not in ("auto", "skimage", "cuda"):
-        raise ValueError("backend must be one of: 'auto', 'skimage', 'cuda'.")
-
+            
     # ------------------------------------------------------------------
     # Pad volume to help close boundary openings ("caps")
     # ------------------------------------------------------------------
     try:
-        # Cast to float before padding, for two reasons: (1) pad_val was
-        # previously ignored entirely (hardcoded constant_values=-1.0) - now
-        # honored; (2) if matrix came in as an unsigned type (e.g. the
-        # uint8 0/1/2/3/4 labels from detect_overhangs), padding with a
-        # negative pad_val on the ORIGINAL dtype silently wraps around
-        # (e.g. -1 -> 255 for uint8) instead of producing a small value
-        # below iso_level - 255 reads as massively solid, so the whole
-        # padded shell caps as solid material instead of empty, wrapping
-        # the real mesh in a spurious solid box. Floats have no such
-        # wraparound, so this is safe for any pad_val/iso_level combo.
         v_padded = np.pad(matrix.astype(float), pad_width=pad_width, mode="constant", constant_values=pad_val)
     except Exception as e:
         logger.error(f"np.pad failed: {e}", exc_info=True)
@@ -486,41 +436,13 @@ def mesh_from_matrix(
             np.abs(y[0,1,0]-y[0,0,0]),
             np.abs(z[0,0,1]-z[0,0,0]))
 
-    # Resolve "auto" now that we know whether a working GPU path exists.
-    if backend == "auto":
-        backend = "cuda" if _cuda_backend_available() else "skimage"
-
     x_origin = x[0,0,0]
     y_origin = y[0,0,0]
     z_origin = z[0,0,0]
     origin = (x_origin - pad_width * spacing[0], y_origin - pad_width * spacing[1], z_origin - pad_width * spacing[2])
 
-    if backend == "cuda":
-        try:
-            import torch
-            import cumcubes
-
-            step = int(algo_step_size)
-            grid = v_padded[::step, ::step, ::step]
-            grid_spacing = (spacing[0]*step, spacing[1]*step, spacing[2]*step)
-
-            lower = origin
-            upper = tuple(origin[i] + (grid.shape[i]-1) * grid_spacing[i] for i in range(3))
-
-            density = torch.from_numpy(np.ascontiguousarray(grid)).float().cuda()
-            verts_t, faces_t = cumcubes.marching_cubes(density, float(iso_level), scale=(lower, upper))
-            verts = verts_t.cpu().numpy()
-            faces = faces_t.cpu().numpy().astype(np.int64)
-
-            logger.info(f"Extracted mesh (cuda) with {len(verts)} verts and {len(faces)} faces.")
-            return verts, faces
-
-        except Exception as e:
-            logger.warning(f"CUDA marching cubes failed ({e}); falling back to skimage.", exc_info=True)
-            backend = "skimage"
-
     # ------------------------------------------------------------------
-    # skimage backend (CPU, default fallback)
+    # Marching cubes (scikit-image)
     # ------------------------------------------------------------------
     try:
         verts, faces, normals, values = measure.marching_cubes(

@@ -86,11 +86,6 @@ def detect_overhangs(voxel_grid: np.ndarray,
     -------
     >>> overhang_grid = detect_overhangs(voxel_grid, x, y, z, angle=45.0)
     """
-    print(voxel_grid.device, x.device, y.device, z.device)
-    # voxel_grid = voxel_grid.to("gpu")
-    # x = x.to("gpu")
-    # y = y.to("gpu")
-    # z = z.to("gpu")
     if x.ndim != 1 or y.ndim != 1 or z.ndim != 1:
         logger.warning("x, y, and z are 3D arrays and will be cut to 1D.")
         x = x[:,0,0]

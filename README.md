@@ -33,17 +33,6 @@
       pip install "triply[gui] @ git+https://github.com/co-foucher/triply.git"
 ```
 
-## CUDA accelerated marching cube optional dependency
-  - THIS IS NOT WORKING (YET)
-  - The `gpu` extra is currently **disabled** in `pyproject.toml`: `cumcubes` needs torch already installed to build, which made `uv run` (and therefore `launcher.bat`) fail for everyone, GPU or not.
-  - To try it manually, in an environment where triply is already installed:
-
-```powershell
-      pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu132
-      pip install ninja
-      pip install --no-build-isolation git+https://github.com/lzhnb/CuMCubes.git
-```
-
 ## local installation
   - If you download the whole repository, you can then use the folder as a source for the library and make any change you want that will also take effect immediately
   - `pip install -e .` behaves the same as the git-URL install above: it only installs the core dependencies. To also install the optional GUI dependencies, use the extras syntax:
