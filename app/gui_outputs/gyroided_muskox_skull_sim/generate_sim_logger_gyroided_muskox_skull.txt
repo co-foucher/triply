@@ -1,6 +1,0 @@
-2026-09-08 14:54:21,539 - INFO - Current working directory: D:\COFO - HP\03 - Github\GYROIDS\app\gui_outputs\gyroided_muskox_skull_sim
-2026-09-08 14:54:21,539 - INFO - loading file : D:\COFO - HP\03 - Github\GYROIDS\app\gui_outputs/gyroided_muskox_skull.inp
-2026-09-08 14:54:22,559 - INFO - using linear tets (C3D4) for linear geometry analysis
-2026-09-08 14:54:23,277 - INFO - job has been created : D:\COFO - HP\03 - Github\GYROIDS\app\gui_outputs\gyroided_muskox_skull_sim/Job-gyroided_muskox_skull.inp
-2026-09-08 14:54:23,277 - INFO - Run it through : python abq_windows debug=DEBUG cpus=6 job=Job-gyroided_muskox_skull
-2026-09-08 14:54:23,277 - INFO - Simulation created successfully.
