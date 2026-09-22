@@ -1,6 +1,4 @@
-__pycache__/
-*.py[cod]
-*$py.class
+# file types to ignore
 *.html
 *.stl
 *.mhd
@@ -15,4 +13,18 @@ __pycache__/
 *.sim
 *.prt
 *.lock
-*.streamlit
+
+# now folders
+# environments & caches
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# packaging artifacts
+*.egg-info/
+build/
+dist/
+__pycache__/
