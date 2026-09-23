@@ -54,7 +54,7 @@ PAGES = [
     },
     {
         "row": 0,
-        "path": "pages/2_Prepare_Print.py",
+        "path": "pages/3_Prepare_Print.py",
         "label": "Prepare print",
         "icon": ":material/print:",
         "what": "Voxelize a mesh, label its overhangs, bridges and needed "
@@ -64,7 +64,7 @@ PAGES = [
     },
     {
         "row": 0,
-        "path": "pages/2_Simulation.py",
+        "path": "pages/4_Simulation.py",
         "label": "Simulation",
         "icon": ":material/science:",
         "what": "Tet-mesh with fTetWild, build and run an ABAQUS job "
@@ -74,7 +74,19 @@ PAGES = [
     },
     {
         "row": 1,
-        "path": "pages/3_CT_Analysis.py",
+        "path": "pages/2_field_generator.py",
+        "label": "Field generator",
+        "icon": ":material/gradient:",
+        "what": "Build a custom 3D field step by step - gradients, primitives, "
+                "equations, distance to an STL - blended and remapped, to "
+                "feed Generate TPMS as implicit field, threshold, thickness "
+                "or period.",
+        "io": "**in** nothing, or an `.stl` / `.npy` "
+              "&nbsp;·&nbsp; **out** `.npy`",
+    },
+    {
+        "row": 1,
+        "path": "pages/5_CT_Analysis.py",
         "label": "CT Analysis",
         "icon": ":material/biotech:",
         "what": "Stack JPG / DICOM / TIFF slices into one volume, build a "
@@ -85,7 +97,7 @@ PAGES = [
     },
     {
         "row": 1,
-        "path": "pages/4_Library.py",
+        "path": "pages/6_Library.py",
         "label": "Library",
         "icon": ":material/folder_open:",
         "what": "Browse the output folder: preview each structure and "
@@ -117,6 +129,7 @@ digraph coroforge {
     scans [label="CT slices", shape=note, fillcolor="#6b7280"];
     ct    [label="CT Analysis", fillcolor="#8a5cd6"];
     gen   [label="Generate TPMS", fillcolor="#2a78d6"];
+    fgen  [label="Field generator", fillcolor="#d6457a"];
     out   [label="output folder", shape=folder, fillcolor="#6b7280"];
     prep  [label="Prepare print", fillcolor="#1baf7a"];
     sim   [label="Simulation", fillcolor="#eb6834"];
@@ -126,6 +139,7 @@ digraph coroforge {
     scans -> ct   [label="JPG/DICOM/TIFF"];
     ct    -> out  [label=".mhd + .stl"];
     gen   -> out  [label=".stl + .npy + .html"];
+    fgen  -> out  [label=".npy field"];
     out   -> gen  [label="combine / import", style=dashed, constraint=false];
     out   -> prep [label=".stl in\l.stl + .html out\l", dir=both];
     out   -> sim  [label=".stl"];
@@ -170,8 +184,9 @@ st.graphviz_chart(_PIPELINE_DOT, width="stretch")
 st.caption(
     "Coloured boxes are pages, grey ones are the files they hand to each "
     "other. The dashed edge is *Generate TPMS* reading a mesh or field back "
-    "in - to gyroid-fill an existing part, or to pick up where a previous "
-    "export left off."
+    "in - to gyroid-fill an existing part, to use a field built on *Field "
+    "generator* (as implicit field, threshold, thickness or period), or to "
+    "pick up where a previous export left off."
 )
 
 st.divider()

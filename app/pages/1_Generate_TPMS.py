@@ -70,6 +70,7 @@ from app.components.tpms_source_panel import (
     generate_ui_tpms,
     pad_to_square,
     render_period_input,
+    make_grid,
 )
 
 #dataclasses is a decorator from Python's standard library that turns a plain class into a lightweight data container: 
@@ -161,11 +162,7 @@ def _make_user_define_parameters(params: TPMSParams):
 
     params.size_y = d2.number_input("Size Y", value=params.size_y, min_value=0.01, key="tpms_size_y")
     params.size_z = d3.number_input("Size Z", value=params.size_z, min_value=0.01, key="tpms_size_z")
-    params.x, params.y, params.z = np.meshgrid(
-            np.linspace(0, params.size_x, params.resolution),
-            np.linspace(0, params.size_y, params.resolution),
-            np.linspace(0, params.size_z, params.resolution),
-            indexing="ij",)
+    params.x, params.y, params.z = make_grid(size_x = params.size_x, size_y = params.size_y, size_z = params.size_z, resolution = params.resolution)
     st.divider()
 
     # ------ Implcit field definition ------

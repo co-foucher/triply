@@ -497,3 +497,32 @@ def render_period_input(
     elif period_matrix.shape != (params.resolution,) * 3:
         period_matrix = _adapt_resolution(period_matrix, params)
     return period_matrix
+
+# =====================================================================
+# 9) make_grid
+# =====================================================================
+@st.cache_resource(max_entries=4, show_spinner=False)
+def make_grid(size_x: float, size_y: float, size_z: float, resolution: int):
+    """
+    ============================================================================
+    2) _GRID
+    Same coordinate grids as 1_Generate_TPMS.py (linspace(0, size, res) per
+    axis, indexing="ij"), so a field built here lands on the exact same
+    voxel centers there. Cached as a resource (shared, not copied) and
+    returned read-only so nothing can mutate the shared copy by accident.
+    ============================================================================
+
+    RETURNS
+    -------
+    X, Y, Z : np.ndarray
+        (res, res, res) coordinate arrays.
+    """
+    X, Y, Z = np.meshgrid(
+        np.linspace(0, size_x, resolution),
+        np.linspace(0, size_y, resolution),
+        np.linspace(0, size_z, resolution),
+        indexing="ij",
+    )
+    for a in (X, Y, Z):
+        a.setflags(write=False)
+    return X, Y, Z

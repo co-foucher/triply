@@ -539,3 +539,89 @@ def CT_analysis_doc():
                 "reloaded later, or used as the mask input of another run.\n" 
                 " - The extracted mesh can be saved as `.stl`."
             )
+
+
+@st.cache_data(show_spinner=False)
+def generate_field_doc() -> None:
+    """
+    ============================================================================
+    13) _RENDER_DOC
+    Collapsed "How this works" explainer. Kept in this file rather than in
+    app/components/documentation.py for now, to leave the other files
+    untouched - move it there alongside the other page docs later.
+    ============================================================================
+    """
+    with st.expander("How this works (steps -> blended field -> .npy)", expanded=False):
+        st.subheader("How the field generator works")
+        st.markdown(
+            "The field is built by a **stack of steps**, evaluated top to bottom on the same "
+            "grid. Starting from a zero field, each step updates the running result:"
+        )
+        st.latex(r"a_0 = 0,\qquad a_i = (1 - w_i)\,a_{i-1} + w_i\,\mathrm{op}_i(a_{i-1},\,b_i)")
+        st.markdown("Where:  \n"
+            "- $b_i$ is the step's **layer** (for a *layer* step), computed on its own.\n"
+            "- $\\mathrm{op}_i$ is the **blend** operation used at this step; options are described below.\n"
+            "- $w_i \\in [0, 1]$ is the **weight** of the blending operation: $w=1$ applies the blend fully, $w=0$ does not apply the blend, and"
+            "in between is a linear mix."
+        )
+
+        st.subheader("Layers, Blends and Modifiers")
+        c1, c2, c3 = st.columns(3)
+        with c2:
+            st.markdown("**Blends** are how to combine your new field ($b$) with the one of the previous step ($a$) : $\\mathrm{op}(a, b)$ ")
+            st.markdown(
+                "| Blend | op(a, b) |\n"
+                "|---|---|\n"
+                "| Replace | $b$ |\n"
+                "| Add | $a + b$ |\n"
+                "| Subtract | $a - b$ |\n"
+                "| Multiply | $a\\,b$ |\n"
+                "| Min | $\\min(a, b)$ |\n"
+                "| Max | $\\max(a, b)$ |\n"
+                "| Smooth min | $\\mathrm{smin}(a, b)$, see below |\n"
+                "| Smooth max | $\\mathrm{smax}(a, b) = -\\mathrm{smin}(-a, -b)$ |"
+            )
+
+            # ----- smooth min / max -----
+            st.markdown("**Smooth min**, with smoothing width $k$:")
+            st.latex(r"\mathrm{smin}(a,b) = \min(a,b) - \frac{\max(k - |a - b|,\,0)^2}{4k}")
+
+        with c1:
+            st.markdown("**Layers** define a new field($b$) in space ($x,y,z$) : $b(x, y, z)$")
+            st.markdown("Several options are available, each with its own parameters. The result is a 3D array of values on the grid, which is then **blended** into the result of the previous step.")
+            st.markdown(
+                "- **Constant**: the same value everywhere.\n"
+                "- **Linear gradient**: from $v_0$ to $v_1$ along a direction, across the box.\n"
+                "- **Radial gradient**: from $v_{in}$ at a center (or axis) to $v_{out}$ at radius $R$.\n"
+                "- **Primitive**: signed distance to a sphere, box or cylinder (negative inside).\n"
+                "- **Gaussian blob**: a bump of height $A$ and width $\\sigma$ around a center.\n"
+                "- **Equation**: any formula $f(x, y, z)$.\n"
+                "- **Import .stl**: signed distance (or mask) of an STL mesh or a `.npy` mask.\n"
+                "- **Import .npy**: a 3D array from disk, resampled to the grid."
+            )
+
+        with c3:
+            st.markdown("**Modifiers** modifies an existing field by a given operation : $op(a)$, where $a$ is the result of previous step")
+            st.markdown("Modifiers are special steps in the sense that they are applied directly to the result of the previous step. there is no new field created and then blended.")
+            st.markdown(
+                "- **Remap range**: rescales $[a_{\\min}, a_{\\max}]$ linearly to $[v_{\\min}, v_{\\max}]$.\n"
+                "- **Clip**: values below $lo$ / above $hi$ become $lo$ / $hi$, or two values of your choice.\n"
+                "- **Gaussian smoothing**: blurs the field over a length $\\sigma$.\n"
+                "- **Transfer function**: per voxel: negate, absolute value, power, smoothstep or step."
+            )
+
+
+        st.divider()
+        st.markdown("**Using the result on *Generate TPMS***")
+        st.markdown(
+            "Save the field, then on *Generate TPMS* choose **Import from file** for the input you built it for "
+            "(implicit field, threshold, thickness or a period). \n"
+            "- **Resolution may differ**: an array of another shape is resampled there (trilinear, "
+                "corner-to-corner), which only blurs sharp features.\n"
+            "- But you should keep your **Size X/Y/Z the same on both pages**: as the .npy file stores values only, not coordinates, different sizes will rescale and distord the field.")
+        st.markdown(" You can quickly check if the field would be usable for different inputs (**these are quick indicators, not absolute truth**): \n"
+            "- **Implicit field** should have both negative and positive values, so the marching cubes can find a surface at threshold = 0.  \n"
+            "- **Thickness** should be > 0.  \n"
+            "- **threshold** is compared to the usual implicit-field values of gyroid and Schwartz-P, so it should be in their range.  \n"
+            "- **period** must stay > 0."
+        )
