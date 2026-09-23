@@ -2,11 +2,14 @@
 
 **triply** is a Python library for designing TPMS (triply periodic minimal surface) structures: generating them, meshing them, checking them for 3D printing, simulating them in ABAQUS, and analysing CT scans of the printed parts.
 
-**coroforge** is its point-and-click app: a local web interface over the same functions, for people who don't want to write code. It isn't a separate package: it ships with triply as the optional `[gui]` extra.
+**coroforge** is its GUI app: a local web interface over the same functions, for people who don't want to write code. It isn't a separate package: it ships with triply as the optional `[gui]` extra.
 
 <img width="1531" height="865" alt="triply use cases and structure" src="https://github.com/user-attachments/assets/2d937bd7-631f-4cb0-888b-6f7126523808" />
 
-## I want to use the app (coroforge)
+## Extra documentation
+Please visit the docs folder for extra documentation on both triply and coroforge
+
+## How to use the app (coroforge)
 
 On Windows, no Python or terminal needed:
 
@@ -16,7 +19,7 @@ On Windows, no Python or terminal needed:
 
 Everything else, from other ways to start it to what each page does, is in the **[coroforge guide](docs/coroforge.md)**.
 
-## I want to use the library (triply)
+## How to use the library (triply)
 
 Requires **Python 3.10**.
 
