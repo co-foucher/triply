@@ -5,6 +5,8 @@
 
 **coroforge** is its GUI app: a local web interface over the same functions, for people who don't want to write code. It isn't a separate package: it ships with triply as the optional `[gui]` extra.
 
+<img src="app/assets/coroforge_home_screenshot.png" alt="coroforge Home page: the page diagram and the page cards" width="900">
+
 
 ## Extra documentation
 Please visit the docs folder for extra documentation on both triply and coroforge
