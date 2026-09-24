@@ -3,7 +3,8 @@ Shared st.session_state helpers used across app/Home.py and app/pages/*.
 
 Kept deliberately small: this is just the session-state wiring (current
 model, output directory, background jobs registry), not pipeline logic -
-that stays in triply.
+that stays in triply. Keeping a page's settings across page switches and
+saving/loading them to a file lives in app/components/page_state.py.
 """
 from pathlib import Path
 

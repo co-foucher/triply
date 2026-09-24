@@ -41,7 +41,6 @@ with st.spinner("Loading triply toolkit..."):
 11 - render_step
 12 - check_intended_use
 13 - render_doc
-14 - widget-state mirror    (restore_widget_state, mirror_widget_state)
 #=====================================================================================================================
 """
 
@@ -734,7 +733,8 @@ def get_steps() -> list:
 def add_step() -> None:
     """on_click of "Add step": appends the step picked in the selectbox."""
     step_type = st.session_state["fg_new_step_type"]
-    sid = uuid.uuid4().hex[:8]
+    # create a unique ID for this step (8 hex chars from uuid4) and store it in the session state
+    sid = uuid.uuid4().hex[:8]  
     is_first = len(get_steps()) == 0
     st.session_state[f"fg_{sid}_blend"] = "Replace" if is_first else "Add"
     get_steps().append({"id": sid, "type": step_type})
@@ -993,34 +993,4 @@ def check_intended_use(use: str, f: np.ndarray) -> None:
             st.success(f"Range [{f_min:.3g}, {f_max:.3g}], > 0 everywhere.")
         st.caption("See 'How this works' for why a steep period gradient distorts the cells.")
 
-
-# =====================================================================
-# 14) widget-state mirror (survives page switches)
-# =====================================================================
-# Streamlit deletes a widget's session_state key at the end of any run in
-# which that widget isn't drawn - i.e. as soon as the user opens another
-# page. fg_steps (plain state) would survive but every step's parameters
-# would reset. So: copy all fg_ widget values into one plain dict at the
-# end of each run, and put back any that went missing at the start of the
-# next one (before the widgets are created, the only time that's allowed).
-_MIRROR_KEY = "fg__mirror"
-# buttons can't be written through session_state; fg_show_step's options
-# change with the steps, so it's recomputed rather than restored.
-# Charts (their keys hold selection state, not user input) are skipped too.
-_NOT_MIRRORED_SUFFIXES = ("_up", "_down", "_del", "_browse_btn", "_preview", "_fieldfig")
-_NOT_MIRRORED_KEYS = ("fg_steps", "fg_show_step", "fg_hist", _MIRROR_KEY)
-
-
-def restore_widget_state() -> None:
-    for k, v in st.session_state.get(_MIRROR_KEY, {}).items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-
-
-def mirror_widget_state() -> None:
-    st.session_state[_MIRROR_KEY] = {
-        k: st.session_state[k] for k in list(st.session_state.keys())
-        if isinstance(k, str) and k.startswith("fg_")
-        and k not in _NOT_MIRRORED_KEYS and not k.endswith(_NOT_MIRRORED_SUFFIXES)
-    }
 

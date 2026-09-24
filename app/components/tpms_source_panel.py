@@ -103,8 +103,8 @@ def render_field_mode() -> str:
     """
     mode_label = st.selectbox(
         "Field Calculation Mode", list(FIELD_MODES.keys()), index=0,
-        key="field_mode",
-        help=FIELD_HELPS[st.session_state.get("field_mode", "Distance")],
+        key="tpms_field_mode",
+        help=FIELD_HELPS[st.session_state.get("tpms_field_mode", "Distance")],
     )
     return FIELD_MODES[mode_label]
 
@@ -169,16 +169,16 @@ def render_threshold(field_mode: str, params) -> np.ndarray:
     if field_mode == "band":
             return 0.0  # Band ignores level/threshold entirely - no widget
     else:
-        threshold_field_source = st.segmented_control( "Threshold", ["Constant", "Custom equation", "Import from file"], default="Constant", key="threshold_field_source",)
+        threshold_field_source = st.segmented_control( "Threshold", ["Constant", "Custom equation", "Import from file"], default="Constant", key="tpms_threshold_source",)
         if threshold_field_source == "Constant":
             value = st.number_input(
                 "Field threshold",
-                value=0.0, label_visibility="collapsed")
+                value=0.0, key="tpms_threshold", label_visibility="collapsed")
             return value
         elif threshold_field_source == "Custom equation":
             custom_threshold_equation = render_equation_input(label="Custom threshold", 
                                                             default_equation = "0.3 + 0.8 * x / max(abs(x))", 
-                                                            key_prefix="threshold_eq",
+                                                            key_prefix="tpms_threshold_eq",
                                                             size_x=params.size_x,
                                                             size_y=params.size_y)
             if custom_threshold_equation is None:
@@ -189,13 +189,13 @@ def render_threshold(field_mode: str, params) -> np.ndarray:
                 return np.array(custom_threshold)
         elif threshold_field_source == "Import from file":
             browse_file(
-                    key=f"threshold_field_matrix_path",
+                    key="tpms_threshold_matrix_path",
                     title=f"Select a threshold matrix file",
                     filetypes=[("Numpy files", "*.npy"), ("All files", "*.*")],
                 )
             # import the matrix from file
             threshold_matrix = import_matrix_from_file(
-                file_path=st.session_state[f"threshold_field_matrix_path"])
+                file_path=st.session_state["tpms_threshold_matrix_path"])
             if threshold_matrix is not None:
                 if threshold_matrix.shape != (params.resolution,) * 3:
                         threshold_matrix = _adapt_resolution(threshold_matrix, params)
@@ -238,13 +238,13 @@ def render_thickness(
 
     if field_mode in SHEET_MODES:
         #thickness_field_source = st.radio("Field Thickness", ["Constant", "Custom equation", "Import from file"], horizontal=True, key="thickness_field_source")
-        thickness_field_source = st.segmented_control( "Thickness", ["Constant", "Custom equation", "Import from file"], default="Constant", key="thickness_field_source",)
+        thickness_field_source = st.segmented_control( "Thickness", ["Constant", "Custom equation", "Import from file"], default="Constant", key="tpms_thickness_source",)
         if thickness_field_source == "Constant":
             return st.number_input("Thickness", value=0.6, min_value=0.05, key="tpms_thickness", label_visibility="collapsed")
         elif thickness_field_source == "Custom equation":
             custom_thickness_equation = render_equation_input(label="Custom thickness equation", 
                                                               default_equation = "0.3 + 0.8 * x / max(abs(x))", 
-                                                              key_prefix="thickness_eq",
+                                                              key_prefix="tpms_thickness_eq",
                                                               size_x=params.size_x, size_y=params.size_y)
             if custom_thickness_equation is None:
                 st.error("Please enter a valid custom thickness equation.")
@@ -254,13 +254,13 @@ def render_thickness(
                 return custom_thickness
         elif thickness_field_source == "Import from file":
             browse_file(
-                    key=f"thickness_field_matrix_path",
+                    key="tpms_thickness_matrix_path",
                     title=f"Select a thickness matrix file",
                     filetypes=[("Numpy files", "*.npy"), ("All files", "*.*")],
                 )
             # import the matrix from file
             thickness_matrix = import_matrix_from_file(
-                file_path=st.session_state[f"thickness_field_matrix_path"])
+                file_path=st.session_state["tpms_thickness_matrix_path"])
             if thickness_matrix is not None:
                 if thickness_matrix.shape != (params.resolution,) * 3:
                         thickness_matrix = _adapt_resolution(thickness_matrix, params)
@@ -448,7 +448,7 @@ def render_period_input(
     source = st.segmented_control(
         f"Period {axis}", ["Constant", "Custom", "Import"],
         default="Constant",
-        key=f"period_{axis.lower()}_source",
+        key=f"tpms_period_{axis.lower()}_source",
     )
 
     # ------ if source == constant ------
@@ -463,7 +463,7 @@ def render_period_input(
         custom_period_equation = render_equation_input(
             label=f"Custom Period {axis} equation",
             default_equation=f"2.0 + 4.0 * {axis.lower()} / max(abs({axis.lower()}))",
-            key_prefix=f"period_{axis.lower()}_eq",
+            key_prefix=f"tpms_period_{axis.lower()}_eq",
             size_x=params.size_x, size_y=params.size_y,
         )
         if custom_period_equation is None:
@@ -478,14 +478,14 @@ def render_period_input(
     # ------ if source == import ------
     # Render the "Browse..." button and 
     browse_file(
-        key=f"{axis.upper()}_period_matrix_path",
+        key=f"tpms_period_{axis.lower()}_matrix_path",
         title=f"Select a {axis.upper()}-period matrix file",
         filetypes=[("Numpy files", "*.npy"), ("All files", "*.*")],
         small_ui=True,
     )
     # import the matrix from file
     period_matrix = import_matrix_from_file(
-        file_path=st.session_state[f"{axis.upper()}_period_matrix_path"]
+        file_path=st.session_state[f"tpms_period_{axis.lower()}_matrix_path"]
     )
     # validate the imported matrix
     if period_matrix is None:

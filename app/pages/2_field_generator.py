@@ -7,26 +7,43 @@ field, threshold, thickness, or period X/Y/Z).
 
 STATUS: first version.
 
-HOW THE PAGE IS BUILT
----------------------
-The field is a stack of steps kept in st.session_state["fg_steps"]
-(a list of {"id", "type"} dicts - only the identity and order of the
-steps). Every parameter of a step lives in its own keyed widget,
-f"fg_{step_id}_{param_name}", so moving/deleting a step never mixes
-up the parameters of the others. Each rerun reads all widgets back into
-a plain config dict per step and runs the pipeline:
 
-    acc_0 = 0
-    acc_i = (1 - w_i) * acc_{i-1} + w_i * op_i(acc_{i-1}, layer_i)
+...
+SESSION-STATE KEYS
+------------------
+Every key of this page starts with "fg_", so app.components.page_state.mirror_widget_state("fg_")
+can save them all when the user leaves the page. `sid` is a step's id: 8 hex
+characters from uuid4, generated once in add_step().
 
-where layer_i is what a "generator" step produces on its own (cached,
-see _compute_layer) and op_i is the chosen blend. A "modifier" step has
-no layer of its own and just transforms acc_{i-1}. The page's own
-"How this works" expander spells out every formula.
+Page-level keys (2_field_generator.py)
+    fg_size_x, fg_size_y, fg_size_z   number_input   grid size
+    fg_resolution                     slider         grid resolution
+    fg_new_step_kind                  segmented      "Generator" / "Modifier"
+    fg_new_step_type                  selectbox      step type to add
+    fg_show_step                      selectbox      which step's result to preview   (not mirrored)
+    fg_preview_orientation            selectbox      slice orientation, made by render_field_slice(key="fg_preview")
+    fg_preview_fieldfig               chart          slice view                        (not mirrored)
+    fg_hist                           chart          histogram                         (not mirrored)
+    fg_intended_use                   segmented      intended use check
+    fg_name                           text_input     output file name
 
-Nothing outside this file is modified: shared components are only
-imported (equation input, field slice view, file picker, STL loader,
-pad_to_square).
+Per-step keys (field_generator_source.render_step / _render_params)
+    fg_{sid}_enabled                  toggle         step on/off
+    fg_{sid}_up / _down / _del        button         move / delete                     (not mirrored)
+    fg_{sid}_blend                    selectbox      blend (layers only)
+    fg_{sid}_weight                   slider         weight / strength w
+    fg_{sid}_k                        number_input   smoothing k (smooth blends only)
+    fg_{sid}_{name}                   one per Param in STEP_TYPES[type]["params"]
+    fg_{sid}_{name}_0 / _1 / _2       the 3 components of a "vec3" Param
+    fg_{sid}_eq_text                  text_area      Equation step (render_equation_input, key_prefix=f"fg_{sid}_eq")
+    fg_{sid}_eq_preview               chart          its preview                       (not mirrored)
+    fg_{sid}_path                     text_input     file path (Import .stl / Import .npy steps)
+    fg_{sid}_path_browse_btn          button         its "Browse..." button            (not mirrored)
+    fg_{sid}_path_browse_error        plain state    its error message, if any
+
+Plain (non-widget) state
+    fg_steps                          list of {"id": sid, "type": step_type}: order and type of the steps
+
 """
 # Repo root isn't on sys.path by default - add it before importing
 # anything under `app.*`. See app/_bootstrap.py for why this is inlined
@@ -52,6 +69,7 @@ with st.spinner("Loading triply toolkit..."):
     import plotly.graph_objects as go
 
     from app.state import init_state, get_output_dir
+    from app.components.page_state import restore_widget_state, mirror_widget_state, render_state_io
 
     from app.components.field_view import render_field_slice
     from app.components.documentation import generate_field_doc
@@ -61,8 +79,6 @@ with st.spinner("Loading triply toolkit..."):
         render_step, 
         get_steps, 
         add_step, 
-        restore_widget_state, 
-        mirror_widget_state, 
         clear_steps,
         run_pipeline, 
         make_grid,
@@ -74,13 +90,16 @@ init_state()
 # ===================== Internal variables ===========================
 # ====================================================================
 DEFAULT_GRID = {"size_x": 10.0, "size_y": 10.0, "size_z": 10.0, "resolution": 64}
-
+FG_NOT_MIRRORED_KEYS = ("fg_show_step", "fg_hist")
+FG_NOT_MIRRORED_SUFFIXES = ("_up", "_down", "_del", "_preview", "_fieldfig")
 # ============================================================
 # ===================== Start Page ===========================
 # ============================================================
-restore_widget_state()
+restore_widget_state("fg_")
 st.title("Field Generator")
 generate_field_doc()
+# save / load this page's settings to <output folder>/sessions_saves/ (see app.components.page_state)
+render_state_io("fg_", exclude_keys=FG_NOT_MIRRORED_KEYS, exclude_suffixes=FG_NOT_MIRRORED_SUFFIXES)
 
 # ==========================================================
 # ==================== grid parameters =====================
@@ -201,4 +220,4 @@ with col_preview:
             np.save(str(out_path) + ".npy", final)
             st.success(f"Saved {out_path}.npy")
 
-mirror_widget_state()
+mirror_widget_state("fg_", exclude_keys=FG_NOT_MIRRORED_KEYS, exclude_suffixes=FG_NOT_MIRRORED_SUFFIXES)

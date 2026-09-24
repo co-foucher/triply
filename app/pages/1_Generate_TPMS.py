@@ -4,6 +4,72 @@ equation, set periods/thickness/resolution/mesh options, preview the
 result, and export an STL.
 
 STATUS: functional.
+
+SESSION-STATE KEYS
+------------------
+Every widget key of this page starts with "tpms_". {x} is x, y or z. Keys
+marked (derived) are built by a shared component from the key or
+key_prefix passed to it; they don't appear literally in this file.
+
+Grid parameters (page)
+    tpms_resolution                       slider         grid resolution
+    tpms_size_x, tpms_size_y, tpms_size_z number_input   grid size
+
+Implicit field (page + tpms_source_panel.render_period_input)
+    tpms_implicit_field_source            radio          "Built-in type" / "Custom equation" / "Import from file"
+    tpms_type_name                        selectbox      built-in surface
+    tpms_period_{x}_source                segmented      "Constant" / "Custom" / "Import"
+    tpms_p{x}                             number_input   constant period
+    tpms_period_{x}_eq_text               text_area      custom period equation   (derived, render_equation_input)
+    tpms_period_{x}_eq_preview            chart          its preview              (derived)
+    tpms_period_{x}_matrix_path           plain state    imported period file     (browse_file, small_ui: no text box)
+    tpms_custom_equation_text             text_area      custom implicit equation (derived, render_equation_input)
+    tpms_custom_equation_preview          chart          its preview              (derived)
+    tpms_field_matrix_path                text_input     imported implicit field  (browse_file)
+
+Density field (tpms_source_panel)
+    tpms_field_mode                       selectbox      Distance / Signed / Signed (inverted) / Band
+    tpms_threshold_source                 segmented      "Constant" / "Custom equation" / "Import from file"
+    tpms_threshold                        number_input   constant threshold
+    tpms_threshold_eq_text / _preview     text_area / chart   custom threshold   (derived)
+    tpms_threshold_matrix_path            text_input     imported threshold      (browse_file)
+    tpms_thickness_source                 segmented      "Constant" / "Custom equation" / "Import from file"
+    tpms_thickness                        number_input   constant thickness
+    tpms_thickness_eq_text / _preview     text_area / chart   custom thickness   (derived)
+    tpms_thickness_matrix_path            text_input     imported thickness      (browse_file)
+
+Baseplates and combine (page)
+    tpms_add_baseplate                    checkbox       baseplates on/off
+    tpms_baseplate_thickness              number_input   baseplate thickness
+    tpms_combine_with_geometry            checkbox       combine on/off
+    tpms_combined_geometry_path           text_input     STL / .npy to combine   (browse_file)
+    tpms_combination_type                 selectbox      Intersection / Union / Substraction
+
+Mesh parameters (page)
+    tpms_auto_smooth                      checkbox       auto-smooth on/off
+    tpms_smoothing_factor                 slider         smoothing factor
+    tpms_simplification_factor            slider         fraction of faces kept
+    tpms_max_faces                        checkbox       limit faces on/off
+    tpms_max_faces_count                  number_input   maximum faces
+
+Previews and export (page)
+    tpms_implicit_field_preview_orientation   selectbox  slice orientation (derived, render_field_slice)
+    tpms_threshold_field_preview_orientation  selectbox  idem, threshold field shown when not constant
+    tpms_thickness_field_preview_orientation  selectbox  idem, thickness field shown when not constant
+    tpms_*_field_preview_fieldfig             chart      the three slice views   (derived)
+    tpms_mesh_colorscale                      selectbox  mesh colouring (derived, render_mesh_preview)
+    tpms_combined_geometry_colorscale         selectbox  idem, preview of the geometry to combine
+    tpms_mesh_meshfig, tpms_combined_geometry_meshfig   chart   the two mesh previews (derived)
+    tpms_file_name                            text_input output file name
+    (the Generate and Export buttons have no key)
+
+Keys added by every browse_file(key=K) (file_picker)
+    K_browse_btn                          button         "Browse..."
+    K_browse_error                        plain state    last dialog error, if any
+
+Plain (non-widget) state, set by generate_ui_tpms() (tpms_source_panel)
+    current_model                         the last generated TPMSModel (initialized by app.state.init_state)
+    current_field_range                   (min, max) of its implicit field, for the slice colour scale
 """
 # Repo root isn't on sys.path by default - add it before importing
 # anything under `app.*`. See app/_bootstrap.py for why this is inlined
@@ -33,6 +99,7 @@ with st.spinner("Loading triply toolkit..."):
     )
 
     from app.state import init_state, get_output_dir
+    from app.components.page_state import restore_widget_state, mirror_widget_state, render_state_io
     from app.components.equation_input import render_equation_input
     from app.components.mesh_preview import render_mesh_preview
     from app.components.field_view import render_field_slice
@@ -41,6 +108,14 @@ with st.spinner("Loading triply toolkit..."):
     from app.components.documentation import generate_TPMS_doc
 
 init_state()
+# put back the tpms_ widget values Streamlit dropped while the user was on
+# another page (see app.components.page_state); must run before any widget is created
+restore_widget_state("tpms_")
+
+# Keys of the tpms_ prefix that must not be saved by mirror_widget_state():
+# charts hold selection state, not user input (buttons are skipped by
+# app.components.page_state itself).
+TPMS_NOT_MIRRORED_SUFFIXES = ("_preview", "_fieldfig", "_meshfig")
 
 # ============================================================
 # ============== define internal variables ===================
@@ -134,6 +209,8 @@ class TPMSParams:
 st.title("Generate a TPMS structure")
 
 generate_TPMS_doc()  # render the "How it works" explainer, cached so it doesn't re-run every rerun
+# save / load this page's settings to <output folder>/sessions_saves/ (see app.components.page_state)
+render_state_io("tpms_", exclude_suffixes=TPMS_NOT_MIRRORED_SUFFIXES)
 
 col_params, col_preview = st.columns([1.4, 1])
 
@@ -167,7 +244,7 @@ def _make_user_define_parameters(params: TPMSParams):
 
     # ------ Implcit field definition ------
     st.subheader("Implicit field definition")
-    params.implicit_field_source = st.radio("Source", ["Built-in type", "Custom equation", "Import from file"], horizontal=True, key="implicit_field_source")
+    params.implicit_field_source = st.radio("Source", ["Built-in type", "Custom equation", "Import from file"], horizontal=True, key="tpms_implicit_field_source")
     if params.implicit_field_source == "Built-in type":
         params.type_name = st.selectbox("TPMS type", list(BUILTIN_TYPES.keys()), key="tpms_type_name")
         c1, c2, c3 = st.columns(3)
@@ -181,10 +258,10 @@ def _make_user_define_parameters(params: TPMSParams):
     elif params.implicit_field_source == "Custom equation":
         params.custom_equation = render_equation_input(label="Custom implicit surface", size_x=params.size_x, size_y=params.size_y, size_z=params.size_z, key_prefix="tpms_custom_equation")
     elif params.implicit_field_source == "Import from file":
-        browse_file(key = "field_matrix_path",
+        browse_file(key = "tpms_field_matrix_path",
             title="Select a matrix file",
             filetypes=[("Numpy files", "*.npy"), ("CSV files", "*.csv"), ("All files", "*.*")],)
-        params.field = import_matrix_from_file(file_path = st.session_state["field_matrix_path"])
+        params.field = import_matrix_from_file(file_path = st.session_state["tpms_field_matrix_path"])
         if params.field is not None :
             params.field = _adapt_resolution(params.field, params)
 
@@ -214,17 +291,17 @@ def _make_user_define_parameters(params: TPMSParams):
     with col_2:
         st.subheader("Combine with existing geometry")
     if combine_with_geometry:
-        browse_file(key = "combined_geometry_path",
+        browse_file(key = "tpms_combined_geometry_path",
             title="Select a matrix file",
             filetypes=[("STL files", "*.stl"), ("Numpy files", "*.npy"), ("All files", "*.*")],)
-        if '.npy' in st.session_state["combined_geometry_path"]:
-            params.geometry = import_matrix_from_file(file_path = st.session_state["combined_geometry_path"])
+        if '.npy' in st.session_state["tpms_combined_geometry_path"]:
+            params.geometry = import_matrix_from_file(file_path = st.session_state["tpms_combined_geometry_path"])
             params.geometry = pad_to_square(params.geometry)
             params.geometry_verts = None
             params.geometry_faces = None
-        elif '.stl' in st.session_state["combined_geometry_path"]:
+        elif '.stl' in st.session_state["tpms_combined_geometry_path"]:
             from triply.mesh_tools import matrix_from_mesh
-            params.geometry_verts, params.geometry_faces = load_STL(st.session_state["combined_geometry_path"])
+            params.geometry_verts, params.geometry_faces = load_STL(st.session_state["tpms_combined_geometry_path"])
             _,_,_, params.geometry = matrix_from_mesh(params.geometry_verts, params.geometry_faces, params.resolution)
             params.geometry = pad_to_square(params.geometry)
         else:
@@ -259,6 +336,9 @@ def _make_user_define_parameters(params: TPMSParams):
             key="tpms_max_faces_count",
             help="If 'Limit maximum faces' is checked, the mesh is simplified to this many faces.",)
     
+    # save the widget values here too: a change inside this @st.fragment
+    # reruns only the fragment, so the call at the end of the page is not reached
+    mirror_widget_state("tpms_", exclude_suffixes=TPMS_NOT_MIRRORED_SUFFIXES)
     return params
 
 with col_params:
@@ -272,7 +352,7 @@ with col_params:
 if params.geometry_verts is not None and params.geometry_faces is not None:
     with col_preview:
         st.subheader("combined geometry preview")
-        render_mesh_preview(params.geometry_faces, params.geometry_verts, key="c_geometry")
+        render_mesh_preview(params.geometry_faces, params.geometry_verts, key="tpms_combined_geometry")
 
 
 # ==========================================================
@@ -294,18 +374,18 @@ with col_preview:
     st.subheader("IMPLICIT Field (2D slice)")
     if model is not None and model.implicit_field is not None:
         render_field_slice(
-            model.implicit_field, model.x, model.y, model.z, key="impolicti_field_preview",
+            model.implicit_field, model.x, model.y, model.z, key="tpms_implicit_field_preview",
             value_range=st.session_state.get("current_field_range"),
         )
         if not isinstance(params.threshold, float) and not isinstance(params.threshold, tuple):
             st.subheader("Complex Threshold Field (2D slice)")
             render_field_slice(
-                params.threshold, model.x, model.y, model.z, key="complex_threshold_field_preview",
+                params.threshold, model.x, model.y, model.z, key="tpms_threshold_field_preview",
             )
         if not isinstance(params.thickness, float) and not isinstance(params.thickness, tuple):
             st.subheader("Complex Thickness Field (2D slice)")
             render_field_slice(
-                params.thickness, model.x, model.y, model.z, key="complex_thickness_field_preview",
+                params.thickness, model.x, model.y, model.z, key="tpms_thickness_field_preview",
         )
     else:
         st.info("Compute a field first to see the 2D slice view.")
@@ -313,7 +393,7 @@ with col_preview:
     
     st.subheader("Mesh preview")
     if model is not None and model.faces is not None:
-        render_mesh_preview(model.faces, model.verts, key="generate")
+        render_mesh_preview(model.faces, model.verts, key="tpms_mesh")
     else:
         st.info("Set parameters and click Generate.")
 
@@ -324,7 +404,7 @@ with col_preview:
 # ==========================================================
 with col_preview:
     if model is not None and model.faces is not None:
-        name = st.text_input("File name", value="my_tpms")
+        name = st.text_input("File name", value="my_tpms", key="tpms_file_name")
 
         # ----- Export STL ------
         if st.button("Export STL"):
@@ -357,3 +437,6 @@ with col_preview:
                 st.error("Thickness field is not a valid 3D array. Please ensure that the model's thickness field is a valid 3D array before exporting.")
     else:
         st.info("Set parameters and click Generate.")
+
+# save every tpms_ widget value so the page comes back as it was left (see app.components.page_state)
+mirror_widget_state("tpms_", exclude_suffixes=TPMS_NOT_MIRRORED_SUFFIXES)
