@@ -23,7 +23,7 @@ with st.spinner("Loading triply toolkit..."):
         render_equation_input, evaluate_custom_inputs, EquationError,
     )
     from app.components.file_picker import browse_file
-    from app.components.tpms_source_panel import load_STL, pad_to_square
+    from app.components.tpms_source_panel import load_STL, pad_to_square, make_grid
 
 """
 #=====================================================================================================================
@@ -45,7 +45,8 @@ with st.spinner("Loading triply toolkit..."):
 """
 
 # TO DELETE AT SOME POINT
-DEFAULT_GRID = {"size_x": 10.0, "size_y": 10.0, "size_z": 10.0, "resolution": 64}
+DEFAULT_GRID = {"size_x": 10.0, "size_y": 10.0, "size_z": 10.0, "resolution": 64,
+                "origin_x": 0.0, "origin_y": 0.0, "origin_z": 0.0}
 
 
 # =====================================================================
@@ -77,6 +78,8 @@ class Param:
           - "vec3"   -> three st.number_input in one row, stored under
                         f"fg_{step_id}_{name}_0/_1/_2"; the value in the
                         params dict is a list [vx, vy, vz].
+          - "text"   -> st.text_area, value stored as str (parsed by the
+                        compute code, e.g. the piecewise-linear points).
     default : Any or callable, optional
         Initial value, written to session_state once (setdefault) the
         first time the widget is drawn.
@@ -114,7 +117,10 @@ class Param:
 # =====================================================================
 # some small helper functions for default values of certain parameters
 def _box_center(g):
-    return [g["size_x"] / 2.0, g["size_y"] / 2.0, g["size_z"] / 2.0]
+    # physical centre of the box [origin, origin + size]
+    return [g["origin_x"] + g["size_x"] / 2.0,
+            g["origin_y"] + g["size_y"] / 2.0,
+            g["origin_z"] + g["size_z"] / 2.0]
 
 
 def _quarter_min_size(g):
@@ -276,15 +282,20 @@ STEP_TYPES = {
             "e1, an S-curve in between with zero slope at both ends; output always in [0, 1]. With "
             "e0 > e1 the curve is reversed (1 below e1, 0 above e0).\n"
             "- **Step**: g = 1 where a >= e0, else 0. A hard binary mask: used directly as a thickness "
-            "or period it gives a sharp, voxel-staircased jump - prefer Smoothstep for a transition."
+            "or period it gives a sharp, voxel-staircased jump - prefer Smoothstep for a transition.\n"
+            "- **Piecewise linear**: a curve through your points (a_i, g_i): linear interpolation between "
+            "two points, constant g = g_first below the first point and g = g_last above the last one."
         ),
         params=[
             Param("function", "Function", "select", default="Smoothstep",
-                  options=("Negate", "Absolute value", "Power", "Smoothstep", "Step")),
+                  options=("Negate", "Absolute value", "Power", "Smoothstep", "Step", "Piecewise linear")),
             Param("gamma", "Exponent gamma", default=2.0, min_value=1e-6,
                   show_if=("function", ("Power",))),
             Param("e0", "Edge e0", default=0.0, show_if=("function", ("Smoothstep", "Step"))),
             Param("e1", "Edge e1", default=1.0, show_if=("function", ("Smoothstep",))),
+            Param("points", "Points (one per line: a, g)", "text", default="0, 0\n0.5, 0.2\n1, 1",
+                  help="Any order; they are sorted by a. Two points can't share the same a.",
+                  show_if=("function", ("Piecewise linear",))),
         ],
     ),
 }
@@ -322,39 +333,21 @@ INTENDED_USES = ("Implicit field", "Threshold", "Thickness", "Period")
 # =====================================================================
 # 2) make_grid
 # =====================================================================
-@st.cache_resource(max_entries=4, show_spinner=False)
-def make_grid(size_x: float, size_y: float, size_z: float, resolution: int):
-    """
-    ============================================================================
-    2) _GRID
-    Same coordinate grids as 1_Generate_TPMS.py (linspace(0, size, res) per
-    axis, indexing="ij"), so a field built here lands on the exact same
-    voxel centers there. Cached as a resource (shared, not copied) and
-    returned read-only so nothing can mutate the shared copy by accident.
-    ============================================================================
-
-    RETURNS
-    -------
-    X, Y, Z : np.ndarray
-        (res, res, res) coordinate arrays.
-    """
-    X, Y, Z = np.meshgrid(
-        np.linspace(0, size_x, resolution),
-        np.linspace(0, size_y, resolution),
-        np.linspace(0, size_z, resolution),
-        indexing="ij",
-    )
-    for a in (X, Y, Z):
-        a.setflags(write=False)
-    return X, Y, Z
+# Imported from app.components.tpms_source_panel (see the imports above) so
+# both pages build the exact same grid:
+#     make_grid(size_x, size_y, size_z, resolution, origin_x, origin_y, origin_z)
+#     -> X, Y, Z = meshgrid(linspace(origin, origin + size, resolution)), indexing="ij"
+# i.e. a regular box [origin, origin + size], cached and read-only.
+# This page calls it as make_grid(*grid_key), hence the order of grid_key:
+#     grid_key = (size_x, size_y, size_z, resolution, origin_x, origin_y, origin_z)
 
 
 # =====================================================================
 # 3) _spacing
 # =====================================================================
 def _spacing(grid_key: tuple) -> Tuple[float, float, float]:
-    """Voxel spacing (dx, dy, dz) = size / (res - 1) for linspace grids."""
-    sx, sy, sz, res = grid_key
+    """Voxel spacing (dx, dy, dz) = size / (res - 1) for linspace grids (origin-independent)."""
+    sx, sy, sz, res = grid_key[:4]
     n = max(res - 1, 1)
     return sx / n, sy / n, sz / n
 
@@ -382,7 +375,7 @@ def _compute_layer(step_type: str, params_json: str, grid_key: tuple,
         json.dumps(params, sort_keys=True) - a string so the cache key is
         cheap and deterministic.
     grid_key : tuple
-        (size_x, size_y, size_z, resolution).
+        (size_x, size_y, size_z, resolution, origin_x, origin_y, origin_z).
     file_stamp : float
         Modification time of the step's input file (0 if none), so an
         edited file on disk invalidates the cache.
@@ -533,7 +526,7 @@ def _geometry_mask(path: str, file_stamp: float, placement: str,
     """
     if not path:
         raise ValueError("No file selected.")
-    sx, sy, sz, res = grid_key
+    sx, sy, sz, res, ox, oy, oz = grid_key
     ext = os.path.splitext(path)[1].lower()
     from triply import voxel_tools
 
@@ -568,9 +561,10 @@ def _geometry_mask(path: str, file_stamp: float, placement: str,
     xg, yg, zg, m = matrix_from_mesh(verts, faces, vox_res)
     m = m.astype(bool)
     idx = []
-    for coords_1d, g in ((np.linspace(0, sx, res), xg),
-                         (np.linspace(0, sy, res), yg),
-                         (np.linspace(0, sz, res), zg)):
+    # physical coordinates of this page's grid along each axis: [origin, origin + size]
+    for coords_1d, g in ((np.linspace(ox, ox + sx, res), xg),
+                         (np.linspace(oy, oy + sy, res), yg),
+                         (np.linspace(oz, oz + sz, res), zg)):
         pitch = (g[1] - g[0]) if len(g) > 1 else 1.0
         i = np.rint((coords_1d - g[0]) / pitch).astype(int)   # nearest voxel of the mesh grid
         valid = (i >= 0) & (i < len(g))
@@ -629,8 +623,124 @@ def _apply_modifier(step_type: str, p: dict, f: np.ndarray, grid_key: tuple) -> 
             return t * t * (3.0 - 2.0 * t)
         if fn == "Step":
             return (f >= p["e0"]).astype(float)
+        if fn == "Piecewise linear":
+            xs, ys = _parse_points(p["points"])
+            return np.interp(f, xs, ys)   # linear in between, constant outside [xs[0], xs[-1]]
 
     raise ValueError(f"Unknown modifier step type: {step_type}")
+
+
+def _parse_points(text: str) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Parses the "Piecewise linear" points: one "a, g" pair per line (comma,
+    semicolon or spaces as separator, blank lines ignored). Returns them
+    sorted by a. Raises ValueError for a malformed line, fewer than 2
+    points, or two points with the same a.
+    """
+    pts = []
+    for n, line in enumerate(str(text).splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.replace(";", ",").replace(",", " ").split()
+        if len(parts) != 2:
+            raise ValueError(f"Points, line {n}: expected 'a, g', got '{line}'.")
+        try:
+            pts.append((float(parts[0]), float(parts[1])))
+        except ValueError:
+            raise ValueError(f"Points, line {n}: '{line}' is not two numbers.") from None
+    if len(pts) < 2:
+        raise ValueError("Piecewise linear needs at least 2 points.")
+    pts.sort()
+    xs = np.array([p[0] for p in pts])
+    ys = np.array([p[1] for p in pts])
+    if np.any(np.diff(xs) == 0):
+        raise ValueError("Two points have the same a: each a must appear only once.")
+    return xs, ys
+
+
+# Modifiers whose effect is a pointwise function g(a), drawn as a curve in their card
+PLOTTED_MODIFIERS = ("Remap range", "Clip", "Transfer function")
+
+
+def render_modifier_plot(cfg: dict, grid_key: tuple) -> None:
+    """
+    ============================================================================
+    RENDER_MODIFIER_PLOT
+    Draws, in a Remap range / Clip / Transfer function card, the curve new value
+    vs original value over the range of values the step actually received
+    (cfg["input_range"], recorded by run_pipeline). Call it after
+    run_pipeline(); does nothing if the step didn't run (off, invalid,
+    error) or isn't a plotted type.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    cfg : dict
+        The step's config, as returned by render_step() and updated by
+        run_pipeline().
+    grid_key : tuple
+        (size_x, size_y, size_z, resolution, origin_x, origin_y, origin_z),
+        passed to _apply_modifier.
+
+    NOTES
+    -----
+    - Solid line: g(a). Dashed line (only if w < 1): what the step
+      really outputs, (1 - w) a + w g(a).
+    - Remap range uses the global min/max of its input; the curve is drawn
+      from a_min to a_max, so it uses exactly the same min/max.
+    - For Piecewise linear the x range is widened to show all the points,
+      and for Clip to show both bounds lo and hi (with a 10 % margin); the
+      shaded band is then the range of a actually present in the field.
+    """
+    if cfg.get("plot_slot") is None or "input_range" not in cfg:
+        return
+    a_min, a_max = cfg["input_range"]
+    lo, hi = (a_min, a_max) if a_max > a_min else (a_min - 0.5, a_max + 0.5)
+
+    pts = None
+    widened = False   # x range extends beyond the values present in the field
+    if cfg["type"] == "Transfer function" and cfg["params"].get("function") == "Piecewise linear":
+        try:
+            pts = _parse_points(cfg["params"]["points"])
+        except ValueError:
+            return   # already reported as the step's error
+        widened = pts[0][0] < lo or pts[0][-1] > hi
+        lo, hi = min(lo, pts[0][0]), max(hi, pts[0][-1])
+    elif cfg["type"] == "Clip":
+        c_lo, c_hi = cfg["params"]["lo"], cfg["params"]["hi"]
+        margin = 0.1 * max(c_hi - c_lo, hi - lo, 1e-9)
+        new_lo, new_hi = min(lo, c_lo - margin), max(hi, c_hi + margin)
+        widened = new_lo < lo or new_hi > hi
+        lo, hi = new_lo, new_hi
+
+    a = np.linspace(lo, hi, 400)
+    if cfg["type"] == "Clip":
+        # sample exactly at the bounds, so the kinks / jumps sit at lo and hi
+        a = np.unique(np.concatenate([a, [cfg["params"]["lo"], cfg["params"]["hi"]]]))
+    try:
+        if cfg["type"] == "Remap range":
+            # its g depends on the input's own min/max: evaluate on the real range only
+            a = np.linspace(a_min, a_max, 400) if a_max > a_min else np.array([a_min, a_min])
+        g = _apply_modifier(cfg["type"], cfg["params"], a, grid_key)
+    except ValueError:
+        return
+
+    w = cfg["weight"]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=a, y=g, mode="lines", name="g(a)", line=dict(color="#2a78d6", width=2.5)))
+    if w < 1.0:
+        fig.add_trace(go.Scatter(x=a, y=(1.0 - w) * a + w * g, mode="lines", name=f"output, w = {w:.2f}",
+                                 line=dict(color="#eb6834", dash="dash", width=2)))
+    if pts is not None:
+        fig.add_trace(go.Scatter(x=pts[0], y=pts[1], mode="markers", name="points",
+                                 marker=dict(color="#2a78d6", size=8)))
+    if widened:
+        fig.add_vrect(x0=a_min, x1=a_max, fillcolor="#2a78d6", opacity=0.07, line_width=0)
+    fig.update_layout(height=240, margin=dict(l=0, r=0, t=10, b=0),
+                      xaxis_title="a (value before this step)", yaxis_title="new value",
+                      legend=dict(orientation="h", y=-0.35, x=0))
+    cfg["plot_slot"].plotly_chart(fig, width="stretch", key=f"fg_{cfg['id']}_map_preview")
 
 
 # =====================================================================
@@ -709,6 +819,7 @@ def run_pipeline(configs: list, grid_key: tuple):
                     messages[cfg["id"]] = ("info", note)
                 new = _blend(cfg["blend"], acc, layer, cfg["k"])
             else:
+                cfg["input_range"] = (float(acc.min()), float(acc.max()))   # for render_modifier_plot
                 new = _apply_modifier(cfg["type"], cfg["params"], acc, grid_key)
         except (ValueError, EquationError, OSError, RuntimeError) as e:
             messages[cfg["id"]] = ("error", str(e))
@@ -782,7 +893,8 @@ def _render_params(sid: str,
         The step type's entry in STEP_TYPES; only spec["params"] (a list of
         Param) is used here.
     grid : dict
-        {"size_x", "size_y", "size_z", "resolution"} of the current grid,
+        {"size_x", "size_y", "size_z", "resolution", "origin_x", "origin_y", "origin_z"}
+        of the current grid,
         passed to callable Param defaults (e.g. a center at mid-box).
 
     RETURNS
@@ -822,6 +934,10 @@ def _render_params(sid: str,
                 vec.append(col.number_input(f"{prm.label} {ax}", key=k, help=prm.help))
             values[prm.name] = vec
 
+        elif prm.kind == "text":
+            st.session_state.setdefault(key, str(default))
+            values[prm.name] = st.text_area(prm.label, key=key, help=prm.help, height=110)
+
         else:  # float
             st.session_state.setdefault(key, float(default))
             values[prm.name] = st.number_input(
@@ -854,7 +970,8 @@ def render_step(i: int,
     step : dict
         {"id": str, "type": str} - the step's type and its unique ID (used to seed widget keys).
     grid : dict
-        {"size_x": float, "size_y": float, "size_z": float, "resolution": int} - the current grid settings.
+        {"size_x", "size_y", "size_z": float, "resolution": int,
+         "origin_x", "origin_y", "origin_z": float} - the current grid settings.
     RETURNS
     -------
     cfg : dict
@@ -933,6 +1050,7 @@ def render_step(i: int,
             eq = render_equation_input(
                 label="Layer", default_equation="x / max(x)", key_prefix=f"fg_{sid}_eq",
                 size_x=grid["size_x"], size_y=grid["size_y"], size_z=grid["size_z"],
+                origin_x=grid["origin_x"], origin_y=grid["origin_y"], origin_z=grid["origin_z"],
             )
             if eq is None:
                 cfg["invalid"] = True
@@ -953,6 +1071,8 @@ def render_step(i: int,
         # now display the rest of the parameters for this step type, which are defined in spec["params"]
         params.update(_render_params(sid, spec, grid))
         cfg["params"] = params
+        if step_type in PLOTTED_MODIFIERS:
+            cfg["plot_slot"] = st.empty()   # filled by render_modifier_plot() once the pipeline has run
         cfg["message_slot"] = st.empty()
     return cfg
 

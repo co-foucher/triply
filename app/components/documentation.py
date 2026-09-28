@@ -607,7 +607,7 @@ def generate_field_doc() -> None:
                 "- **Remap range**: rescales $[a_{\\min}, a_{\\max}]$ linearly to $[v_{\\min}, v_{\\max}]$.\n"
                 "- **Clip**: values below $lo$ / above $hi$ become $lo$ / $hi$, or two values of your choice.\n"
                 "- **Gaussian smoothing**: blurs the field over a length $\\sigma$.\n"
-                "- **Transfer function**: per voxel: negate, absolute value, power, smoothstep or step."
+                "- **Transfer function**: per voxel: negate, absolute value, power, smoothstep, step, or a piecewise-linear curve through your own points."
             )
 
 

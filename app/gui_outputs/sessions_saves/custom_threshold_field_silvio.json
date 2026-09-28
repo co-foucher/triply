@@ -1,0 +1,71 @@
+{
+  "format_version": 1,
+  "prefix": "fg_",
+  "saved_at": "2026-09-24T16:17:36",
+  "state": {
+    "fg_38ff3aa9_eq_text": "sin(x/2)  * cos(y/5) * 1.4",
+    "fg_31b149a7_center_1": 22.0,
+    "fg_intended_use": "Thickness",
+    "fg_0a04df5d_hi": 4.0,
+    "fg_31b149a7_shape": "Sphere",
+    "fg_name": "custom_threshold_field",
+    "fg_d96b1a20_weight": 1.0,
+    "fg_resolution": 96,
+    "fg_2a16cfed_v_max": 0.0,
+    "fg_2a16cfed_enabled": true,
+    "fg_size_z": 30.0,
+    "fg_31b149a7_weight": 1.0,
+    "fg_steps": [
+      {
+        "id": "31b149a7",
+        "type": "Primitive (signed distance)"
+      },
+      {
+        "id": "0a04df5d",
+        "type": "Clip"
+      },
+      {
+        "id": "2a16cfed",
+        "type": "Remap range"
+      },
+      {
+        "id": "38ff3aa9",
+        "type": "Equation"
+      },
+      {
+        "id": "d96b1a20",
+        "type": "Clip"
+      }
+    ],
+    "fg_31b149a7_enabled": true,
+    "fg_31b149a7_center_2": 15.0,
+    "fg_31b149a7_radius": 20.0,
+    "fg_38ff3aa9_weight": 1.0,
+    "fg_d96b1a20_enabled": true,
+    "fg_35266765_blend": "Add",
+    "fg_31b149a7_blend": "Replace",
+    "fg_d96b1a20_lo": 0.0,
+    "fg_new_step_kind": "Modifier",
+    "fg_31b149a7_center_0": 30.0,
+    "fg_2a16cfed_blend": "Add",
+    "fg_38ff3aa9_blend": "Smooth max",
+    "fg_0a04df5d_enabled": true,
+    "fg_size_y": 30.0,
+    "fg_0a04df5d_outside": "Keep bounds",
+    "fg_d96b1a20_outside": "Keep bounds",
+    "fg_d96b1a20_blend": "Add",
+    "fg_0a04df5d_lo": -4.0,
+    "fg_38ff3aa9_enabled": true,
+    "fg_46336701_blend": "Add",
+    "fg_d96b1a20_hi": 1.4,
+    "fg_new_step_type": "Clip",
+    "fg_0a04df5d_blend": "Add",
+    "fg_2c169c08_blend": "Add",
+    "fg_size_x": 30.0,
+    "fg_2a16cfed_v_min": 1.3,
+    "fg_preview_orientation": "y,x",
+    "fg_0a04df5d_weight": 1.0,
+    "fg_2a16cfed_weight": 1.0,
+    "fg_38ff3aa9_k": 3.0
+  }
+}

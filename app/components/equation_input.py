@@ -401,7 +401,10 @@ def render_equation_input(label: str = "Default label",
                           key_prefix: str = "eq",
                           size_x: float = 10.0,
                           size_y: float = 10.0,
-                          size_z: float = 10.0
+                          size_z: float = 10.0,
+                          origin_x: float = 0.0,
+                          origin_y: float = 0.0,
+                          origin_z: float = 0.0,
                           ) -> Optional[str]:
     """
     ============================================================================
@@ -418,6 +421,12 @@ def render_equation_input(label: str = "Default label",
         Prefix used to namespace this widget's Streamlit session_state
         keys (default = "eq"), so multiple equation inputs can coexist
         on the same page.
+    size_x, size_y, size_z : float, optional
+        Box edge lengths of the preview grid.
+    origin_x, origin_y, origin_z : float, optional
+        Box corner with the smallest coordinates (default 0), so the
+        preview covers the same physical box [origin, origin + size] as
+        the real grid.
 
     RETURNS
     -------
@@ -451,10 +460,10 @@ def render_equation_input(label: str = "Default label",
     with st.expander("Preview of Field (mid z-slice, low-res)", expanded=False):
         _, fn = parse_equation(equation)
         n = 120
-        g1 = np.linspace(0, size_x, n)
-        g2 = np.linspace(0, size_y, n)
+        g1 = np.linspace(origin_x, origin_x + size_x, n)
+        g2 = np.linspace(origin_y, origin_y + size_y, n)
         gx, gy = np.meshgrid(g1, g2, indexing="ij")
-        gz = np.zeros_like(gx) + size_z / 2.0
+        gz = np.zeros_like(gx) + origin_z + size_z / 2.0
         field = fn(gx, gy, gz)
         field = np.broadcast_to(np.asarray(field, dtype=float), gx.shape)
 

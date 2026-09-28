@@ -17,6 +17,7 @@ characters from uuid4, generated once in add_step().
 
 Page-level keys (2_field_generator.py)
     fg_size_x, fg_size_y, fg_size_z   number_input   grid size
+    fg_origin_x, fg_origin_y, fg_origin_z  number_input   grid origin (box corner with the smallest coordinates)
     fg_resolution                     slider         grid resolution
     fg_new_step_kind                  segmented      "Generator" / "Modifier"
     fg_new_step_type                  selectbox      step type to add
@@ -37,6 +38,7 @@ Per-step keys (field_generator_source.render_step / _render_params)
     fg_{sid}_{name}_0 / _1 / _2       the 3 components of a "vec3" Param
     fg_{sid}_eq_text                  text_area      Equation step (render_equation_input, key_prefix=f"fg_{sid}_eq")
     fg_{sid}_eq_preview               chart          its preview                       (not mirrored)
+    fg_{sid}_map_preview              chart          curve g(a) of a Remap range / Transfer function step (not mirrored)
     fg_{sid}_path                     text_input     file path (Import .stl / Import .npy steps)
     fg_{sid}_path_browse_btn          button         its "Browse..." button            (not mirrored)
     fg_{sid}_path_browse_error        plain state    its error message, if any
@@ -81,6 +83,7 @@ with st.spinner("Loading triply toolkit..."):
         add_step, 
         clear_steps,
         run_pipeline, 
+        render_modifier_plot,
         make_grid,
     )
 
@@ -89,7 +92,8 @@ init_state()
 # ====================================================================
 # ===================== Internal variables ===========================
 # ====================================================================
-DEFAULT_GRID = {"size_x": 10.0, "size_y": 10.0, "size_z": 10.0, "resolution": 64}
+DEFAULT_GRID = {"size_x": 10.0, "size_y": 10.0, "size_z": 10.0, "resolution": 64,
+                "origin_x": 0.0, "origin_y": 0.0, "origin_z": 0.0}
 FG_NOT_MIRRORED_KEYS = ("fg_show_step", "fg_hist")
 FG_NOT_MIRRORED_SUFFIXES = ("_up", "_down", "_del", "_preview", "_fieldfig")
 # ============================================================
@@ -117,11 +121,25 @@ g1.number_input("Size X", min_value=0.01, key="fg_size_x")
 g2.number_input("Size Y", min_value=0.01, key="fg_size_y")
 g3.number_input("Size Z", min_value=0.01, key="fg_size_z")
 
+# ----- grid origin: the box spans [origin, origin + size] on each axis ----
+# Must match the origin set on Generate TPMS: the saved .npy carries no coordinates,
+# it is mapped voxel-by-voxel, so every step that uses absolute coordinates
+# (Equation, centers, Absolute-coordinates STL) is only aligned if both origins agree.
+_, h1, h2, h3 = st.columns([2, 1, 1, 1])
+h1.number_input("Origin X", key="fg_origin_x",
+                help="Same as 'origin X' on Generate TPMS. Box = [origin, origin + size].")
+h2.number_input("Origin Y", key="fg_origin_y",
+                help="Same as 'origin Y' on Generate TPMS. Box = [origin, origin + size].")
+h3.number_input("Origin Z", key="fg_origin_z",
+                help="Same as 'origin Z' on Generate TPMS. Box = [origin, origin + size].")
+
 # ----- compute the grid key for caching the generated layers ----
 # dictionnary defining the grid parameters, used to compute the generated layers
 grid = {k: st.session_state[f"fg_{k}"] for k in DEFAULT_GRID}
 # the grid key is used to cache the generated layers, so that if the user changes a step parameter but not the grid, the layer is not recomputed
-grid_key = (float(grid["size_x"]), float(grid["size_y"]), float(grid["size_z"]), int(grid["resolution"]))
+# order = make_grid's signature, so make_grid(*grid_key) works
+grid_key = (float(grid["size_x"]), float(grid["size_y"]), float(grid["size_z"]), int(grid["resolution"]),
+            float(grid["origin_x"]), float(grid["origin_y"]), float(grid["origin_z"]))
 
 
 st.divider()
@@ -177,6 +195,7 @@ if configs:
             cfg["message_slot"].error(text)
         elif level == "info":
             cfg["message_slot"].info(text)
+        render_modifier_plot(cfg, grid_key)   # curve g(a) in Remap range / Transfer function cards
     if configs and not snapshots:
         final = None
     if configs[0]["enabled"] and STEP_TYPES[configs[0]["type"]]["kind"] == "modifier":

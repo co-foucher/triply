@@ -1,0 +1,58 @@
+{
+  "format_version": 1,
+  "prefix": "fg_",
+  "saved_at": "2026-09-24T16:33:28",
+  "state": {
+    "fg_696cf48f_weight": 1.0,
+    "fg_f57b94b4_blend": "Add",
+    "fg_intended_use": "Thickness",
+    "fg_name": "custom_x_period_field_silvio",
+    "fg_resolution": 96,
+    "fg_6efbb226_enabled": true,
+    "fg_size_z": 30.0,
+    "fg_696cf48f_v0": 5.0,
+    "fg_steps": [
+      {
+        "id": "696cf48f",
+        "type": "Linear gradient"
+      },
+      {
+        "id": "f57b94b4",
+        "type": "Transfer function"
+      },
+      {
+        "id": "6efbb226",
+        "type": "Remap range"
+      }
+    ],
+    "fg_77a636da_blend": "Add",
+    "fg_35266765_blend": "Add",
+    "fg_696cf48f_direction_2": 0.0,
+    "fg_696cf48f_blend": "Replace",
+    "fg_new_step_kind": "Modifier",
+    "fg_2a16cfed_blend": "Add",
+    "fg_6efbb226_weight": 1.0,
+    "fg_6efbb226_v_min": 5.0,
+    "fg_size_y": 30.0,
+    "fg_d44ed7d3_blend": "Add",
+    "fg_696cf48f_direction_0": 1.0,
+    "fg_f57b94b4_e0": 10.0,
+    "fg_6efbb226_v_max": 14.0,
+    "fg_696cf48f_v1": 14.0,
+    "fg_d96b1a20_blend": "Add",
+    "fg_f57b94b4_function": "Smoothstep",
+    "fg_46336701_blend": "Add",
+    "fg_696cf48f_direction_1": 0.0,
+    "fg_f57b94b4_weight": 1.0,
+    "fg_f57b94b4_e1": 12.0,
+    "fg_0a04df5d_blend": "Add",
+    "fg_new_step_type": "Remap range",
+    "fg_2c169c08_blend": "Add",
+    "fg_f57b94b4_enabled": true,
+    "fg_size_x": 30.0,
+    "fg_preview_orientation": "x,y",
+    "fg_b68f4aab_blend": "Add",
+    "fg_6efbb226_blend": "Add",
+    "fg_696cf48f_enabled": true
+  }
+}

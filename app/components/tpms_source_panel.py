@@ -309,21 +309,30 @@ def generate_ui_tpms(
     - EquationError raised by evaluate_custom_inputs() is caught internally
       and shown as a Streamlit error message rather than propagating.
     """
-    x, y, z = np.meshgrid(
-        np.linspace(0, params.size_x, params.resolution),
-        np.linspace(0, params.size_y, params.resolution),
-        np.linspace(0, params.size_z, params.resolution),
-        indexing="ij",)
+    x, y, z = params.x, params.y, params.z   # physical Cartesian grid, used for meshing
+    # coordinates the equation is evaluated in (= x, y, z in Cartesian mode)
+    grid_mode = params.grid_mode or "Cartesian"
+    periods = (params.px, params.py, params.pz) if params.implicit_field_source == "Built-in type" else (None, None, None)
+    # u, v, w are the coordinates in which the TPMS equation is evaluated, they 
+    # are different from x,y,z in the case where we use cylindrical or spherical coordinate sytem.
+    u, v, w = conformal_coords(x, y, z, grid_mode, periods)
 
     try:
         with st.spinner("Computing field and generating mesh..."):
             # ----- Built-in type ------
             if params.implicit_field_source == "Built-in type":
-                model = BUILTIN_TYPES[params.type_name](x, y, z, params.px, params.py, params.pz, params.thickness)
+                if grid_mode == "Cartesian":
+                    model = BUILTIN_TYPES[params.type_name](x, y, z, params.px, params.py, params.pz, params.thickness)
+                else:
+                    # evaluate the TPMS equation in (u, v, w), then hand the field to a
+                    # model living on the Cartesian grid (meshing needs a regular box)
+                    curved = BUILTIN_TYPES[params.type_name](u, v, w, params.px, params.py, params.pz, params.thickness)
+                    model = CustomTPMSModel(x, y, z, params.thickness, field=curved._implicit_field())
 
             # ----- Custom equation ------
             elif params.implicit_field_source == "Custom equation":
-                params.field = evaluate_custom_inputs(params.custom_equation, x, y, z)
+                # in the equation, x, y, z stand for u, v, w (see conformal_coords)
+                params.field = evaluate_custom_inputs(params.custom_equation, u, v, w)
                 model = CustomTPMSModel(x, y, z, params.thickness, field=params.field)
 
             # ----- Import from file ------
@@ -502,27 +511,193 @@ def render_period_input(
 # 9) make_grid
 # =====================================================================
 @st.cache_resource(max_entries=4, show_spinner=False)
-def make_grid(size_x: float, size_y: float, size_z: float, resolution: int):
+def make_grid(size_x: float, size_y: float, size_z: float,
+              resolution: int,
+              origin_x: float = 0.0, origin_y: float = 0.0, origin_z: float = 0.0,
+              ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     ============================================================================
-    2) _GRID
-    Same coordinate grids as 1_Generate_TPMS.py (linspace(0, size, res) per
-    axis, indexing="ij"), so a field built here lands on the exact same
-    voxel centers there. Cached as a resource (shared, not copied) and
-    returned read-only so nothing can mutate the shared copy by accident.
+    9) MAKE_GRID
+    Builds the (cached, read-only) physical voxel grid: a regular Cartesian
+    box [origin, origin + size] sampled with `resolution` points per axis.
     ============================================================================
+
+    PARAMETERS
+    ----------
+    size_x, size_y, size_z : float
+        Box edge lengths.
+    resolution : int
+        Number of samples per axis.
+    origin_x, origin_y, origin_z : float, optional
+        Position of the box corner with the smallest coordinates (default 0).
 
     RETURNS
     -------
     X, Y, Z : np.ndarray
         (res, res, res) coordinate arrays.
+
+    NOTES
+    -----
+    - This grid is ALWAYS Cartesian, whatever the grid mode: marching cubes,
+      the distance transform, the baseplates and the slice viewer all need a
+      regular, axis-aligned voxel box. The cylindrical / spherical modes only
+      change the coordinates the TPMS equation is evaluated in, see
+      conformal_coords().
     """
     X, Y, Z = np.meshgrid(
-        np.linspace(0, size_x, resolution),
-        np.linspace(0, size_y, resolution),
-        np.linspace(0, size_z, resolution),
+        np.linspace(origin_x, origin_x + size_x, resolution),
+        np.linspace(origin_y, origin_y + size_y, resolution),
+        np.linspace(origin_z, origin_z + size_z, resolution),
         indexing="ij",
     )
     for a in (X, Y, Z):
         a.setflags(write=False)
     return X, Y, Z
+
+
+# =====================================================================
+# 10) conformal_coords
+# =====================================================================
+def _arc_scale(r_ref: float, period) -> float:
+    """
+    Length L such that the arc coordinate L*angle wraps an INTEGER number N
+    of periods around a full turn (angle 0 -> 2 pi), so there is no seam:
+        N = max(1, round(2 pi r_ref / p)),   L = N p / (2 pi).
+    At radius r_ref the cells are then ~p long along the circle. With no
+    period (custom equation), L = r_ref, i.e. the plain arc length at r_ref.
+    A per-voxel period array is replaced by its mean for this choice only.
+    """
+    if period is None:
+        return r_ref
+    p = float(np.mean(period))
+    n = max(1, int(round(2.0 * np.pi * r_ref / p)))
+    return n * p / (2.0 * np.pi)
+
+
+def conformal_coords(x: np.ndarray, y: np.ndarray, z: np.ndarray,
+                     grid_mode: str,
+                     periods: tuple = (None, None, None)):
+    """
+    ============================================================================
+    10) CONFORMAL_COORDS
+    Maps the physical Cartesian grid (x, y, z) to the coordinates (u, v, w)
+    in which the TPMS equation is evaluated, and gives the signed distance
+    to the cylinder / sphere that bounds the part.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    x, y, z : np.ndarray
+        Physical grid from make_grid().
+    grid_mode : str
+        "Cartesian", "Cylindrical" or "Spherical".
+    periods : tuple of 3 (float, np.ndarray or None)
+        (px, py, pz), only used to snap the angular coordinate so an integer
+        number of cells fits around the axis (None = no snapping).
+
+    RETURNS
+    -------
+    u, v, w : np.ndarray
+        Evaluation coordinates, same shape as x.
+
+    NOTES
+    -----
+    Centre c = (0, 0, 0), wherever the box is. Axis of the cylinder: the
+    z axis (x = y = 0). R = half of the smallest box edge (cylinder: of x and y).
+    r_ref = R / 2 (mid-radius), where cells have their nominal size.
+    - Cartesian  : u, v, w = x, y, z.
+    - Cylindrical: r = sqrt(dx^2 + dy^2), theta = atan2(dy, dx) in (-pi, pi]
+                   u = r,  v = L_y * theta,  w = z
+                   with L_y = _arc_scale(r_ref, py).
+    - Spherical  : r = |x - c|, polar = arccos(dz / r) in [0, pi],
+                   azimuth = atan2(dy, dx) in (-pi, pi]
+                   u = r,  v = r_ref * polar,  w = L_z * azimuth
+                   with L_z = _arc_scale(r_ref, pz).
+    - Consequences of the mapping (not bugs): cells are wedge-shaped (their
+      tangential size grows linearly with r), and they degenerate on the
+      axis r = 0 (cylinder) / on the polar axis and at the centre (sphere),
+      where all angles meet in one line / point.
+    """
+    if grid_mode == "Cartesian":
+        return x, y, z
+
+    cx, cy, cz = 0.0, 0.0, 0.0   # centre = origin of the coordinate system, not of the box
+    lx = x[-1, 0, 0] - x[0, 0, 0]   # physical box size along each axis
+    ly = y[0, -1, 0] - y[0, 0, 0]
+    lz = z[0, 0, -1] - z[0, 0, 0]
+    dx, dy, dz = x - cx, y - cy, z - cz
+
+    if grid_mode == "Cylindrical":
+        # in cylindrical coordinates, the TPMS equation is evaluated in (r, theta, z) instead of (x, y, z).
+        # thus the first matrix is "how far away from the axis" (r), 
+        # the second is "how far around the axis" (theta), 
+        # and the third is "how far along the axis" (z).
+        R = 0.5 * min(lx, ly)
+        r = np.hypot(dx, dy)
+        theta = np.arctan2(dy, dx)
+        # L_y is the length along the circumference that corresponds to a full turn (2 pi) 
+        # at radius r_ref = 0.5 * R, scaled to fit an integer number of periods.
+        L_y = _arc_scale(0.5 * R, periods[1])
+        # you return L_y * theta instead of theta because the
+        # TPMS equation expects a linear coordinate along the circumference, not an angle.
+        return r, L_y * theta, z
+
+    if grid_mode == "Spherical":
+        R = 0.5 * min(lx, ly, lz)
+        r = np.sqrt(dx**2 + dy**2 + dz**2)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            polar = np.arccos(np.clip(np.where(r > 0, dz / r, 1.0), -1.0, 1.0))
+        azimuth = np.arctan2(dy, dx)
+        r_ref = 0.5 * R
+        L_z = _arc_scale(r_ref, periods[2])
+        return r, r_ref * polar, L_z * azimuth
+
+    raise ValueError(f"Unknown grid mode: {grid_mode}")
+
+
+
+def documentation_cyl_and_sphere_systems(mode: str):
+    """
+    ============================================================================
+    DOCUMENTATION_CYL_AND_SPHERE_SYSTEMS
+    Returns a string documenting the cylindrical and spherical coordinate
+    systems used in the TPMS generator.
+    ============================================================================
+    PARAMETERS
+    ----------
+    mode : str
+        Either "Cylindrical" or "Spherical", indicating which coordinate system's documentation to return.
+
+    RETURNS
+    -------
+    none, just a st.info() call with the documentation string.
+    """
+    if mode == "Cylindrical":
+        st.info(
+            "In cylindrical coordinates, the TPMS equation is evaluated in (r, theta, z) instead of (x, y, z). "
+            "The first matrix is 'how far away from the axis' (r), the second is 'how far around the axis' (theta), "
+            "and the third is 'how far along the axis' (z). For example, a gyroid usually calculated as:"
+        )
+        st.latex(r"\sin\bigg(\frac{2 \pi}{p_x} x\bigg)\cos\bigg(\frac{2 \pi}{p_y} y\bigg) + \sin\bigg(\frac{2 \pi}{p_x} y\bigg)\cos\bigg(\frac{2 \pi}{p_z} z\bigg) + \sin\bigg(\frac{2 \pi}{p_z} z\bigg)\cos\bigg(\frac{2 \pi}{p_x} x\bigg) = 0")
+        st.info("which, substituting $x=r$, $y=L_y\\theta$, $z=z$, becomes:")
+        st.latex(r"\sin\bigg(\frac{2 \pi}{p_x} r\bigg)\cos\bigg(\frac{2 \pi}{p_y} L_y\theta\bigg) + \sin\bigg(\frac{2 \pi}{p_y} L_y\theta\bigg)\cos\bigg(\frac{2 \pi}{p_z} z\bigg) + \sin\bigg(\frac{2 \pi}{p_z} z\bigg)\cos\bigg(\frac{2 \pi}{p_x} r\bigg) = 0")
+        st.latex(r"\text{where } L_y = \frac{n * p_y}{2 \pi} \text{ and } n = \text{round}\bigg(\frac{2 \pi * r_{ref}}{p_y}\bigg)")
+        # n = max(1, int(round(2.0 * np.pi * r_ref / p)))
+        st.info("Where $r_{ref}$ is the radius of the cylinder inscribed within the box."
+        "Meaning that $L_y$ is the coefficient correcting $p_y$"
+        "such that an integer number of cells fits around the circumference.")
+    elif mode == "Spherical":
+        st.info(
+            "In spherical coordinates, the TPMS equation is evaluated in (r, polar, azimuth) instead of (x, y, z). "
+            "The first matrix is 'how far away from the center' (r), the second is 'the polar angle' (polar), "
+            "and the third is 'the azimuthal angle' (azimuth). For example, a gyroid usually calculated as:"
+        )
+        st.latex(r"\sin\bigg(\frac{2 \pi}{p_x} x\bigg)\cos\bigg(\frac{2 \pi}{p_y} y\bigg) + \sin\bigg(\frac{2 \pi}{p_x} y\bigg)\cos\bigg(\frac{2 \pi}{p_z} z\bigg) + \sin\bigg(\frac{2 \pi}{p_z} z\bigg)\cos\bigg(\frac{2 \pi}{p_x} x\bigg) = 0")
+        st.info("which, substituting $x=r$, $y=r_{ref}\\cdot \\theta_{polar}$, $z=L_z\\cdot \\theta_{azimuth}$, becomes:")
+        st.latex(r"\sin(r)\cos(r_{ref}\theta_{polar}) + \sin(r_{ref}\theta_{polar})\cos(L_z\theta_{azimuth}) + \sin(L_z\theta_{azimuth})\cos(r) = 0")
+        st.latex(r"\text{where } L_z = \frac{n * p_z}{2 \pi} \text{ and } n = \text{round}\bigg(\frac{2 \pi * r_{ref}}{p_z}\bigg)")
+        st.info("Where $r_{ref}$ is the radius of the sphere inscribed within the box"
+        "Meaning that $L_z$ is the coefficient correcting $p_z$"
+        "such that an integer number of cells fits around the azimuthal angle.")
+    else: 
+        st.error(f"Unknown mode: {mode}. Please choose either 'Cylindrical' or 'Spherical'.")

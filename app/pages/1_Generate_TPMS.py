@@ -146,6 +146,7 @@ from app.components.tpms_source_panel import (
     pad_to_square,
     render_period_input,
     make_grid,
+    documentation_cyl_and_sphere_systems,
 )
 
 #dataclasses is a decorator from Python's standard library that turns a plain class into a lightweight data container: 
@@ -166,7 +167,11 @@ class TPMSParams:
     size_x: float = 10.0
     size_y: float = 10.0
     size_z: float = 10.0
+    origin_x: float = 0.0
+    origin_y: float = 0.0
+    origin_z: float = 0.0
     resolution: int = 64
+    grid_mode: str = "Cartesian"
     x: np.ndarray = None
     y: np.ndarray = None
     z: np.ndarray = None
@@ -234,12 +239,25 @@ def _make_user_define_parameters(params: TPMSParams):
         key="tpms_resolution",
         help="Higher = finer surface but slower generation. Start low (~48-64) while iterating.",
     )
+    params.grid_mode = st.segmented_control(
+        "Grid mode", ["Cartesian", "Cylindrical", "Spherical"],
+        default=params.grid_mode,
+        key="tpms_grid_mode",
+        help="Coordinates the TPMS equation is evaluated in. Choose one for more info.",
+    ) or "Cartesian"   # segmented_control returns None if the user deselects
+    if params.grid_mode != "Cartesian":
+        documentation_cyl_and_sphere_systems(mode=params.grid_mode)
     d1, d2, d3 = st.columns(3)
     params.size_x = d1.number_input("Size X", value=params.size_x, min_value=0.01, key="tpms_size_x")
-
     params.size_y = d2.number_input("Size Y", value=params.size_y, min_value=0.01, key="tpms_size_y")
     params.size_z = d3.number_input("Size Z", value=params.size_z, min_value=0.01, key="tpms_size_z")
-    params.x, params.y, params.z = make_grid(size_x = params.size_x, size_y = params.size_y, size_z = params.size_z, resolution = params.resolution)
+    h1, h2, h3 = st.columns(3)
+    params.origin_x = h1.number_input("origin X", value=params.origin_x, key="tpms_origin_x")
+    params.origin_y = h2.number_input("origin Y", value=params.origin_y, key="tpms_origin_y")
+    params.origin_z = h3.number_input("origin Z", value=params.origin_z, key="tpms_origin_z")
+    params.x, params.y, params.z = make_grid(size_x = params.size_x, size_y = params.size_y, size_z = params.size_z, 
+                                             resolution = params.resolution,
+                                             origin_x = params.origin_x, origin_y = params.origin_y, origin_z = params.origin_z)
     st.divider()
 
     # ------ Implcit field definition ------
