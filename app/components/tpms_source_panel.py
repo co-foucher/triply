@@ -180,12 +180,14 @@ def render_threshold(field_mode: str, params) -> np.ndarray:
                                                             default_equation = "0.3 + 0.8 * x / max(abs(x))", 
                                                             key_prefix="tpms_threshold_eq",
                                                             size_x=params.size_x,
-                                                            size_y=params.size_y)
+                                                            size_y=params.size_y,
+                                                            size_z=params.size_z,
+                                                            origin_x=params.origin_x, origin_y=params.origin_y, origin_z=params.origin_z)
             if custom_threshold_equation is None:
                 st.error("Please enter a valid custom threshold equation.")
-                return np.full_like(params.x, 0.0)
+                return np.full_like(params.u, 0.0)
             else:
-                custom_threshold = evaluate_custom_inputs(custom_threshold_equation, params.x, params.y, params.z)
+                custom_threshold = evaluate_custom_inputs(custom_threshold_equation, params.u, params.v, params.w)
                 return np.array(custom_threshold)
         elif threshold_field_source == "Import from file":
             browse_file(
@@ -234,7 +236,7 @@ def render_thickness(
         st.caption(
             f"Note: thichkness is not used in {mode_label}' mode."
         )
-        return None  # thickness is ignored in skeletal modes
+        return 0.0  # thickness is ignored in skeletal modes
 
     if field_mode in SHEET_MODES:
         #thickness_field_source = st.radio("Field Thickness", ["Constant", "Custom equation", "Import from file"], horizontal=True, key="thickness_field_source")
@@ -245,12 +247,13 @@ def render_thickness(
             custom_thickness_equation = render_equation_input(label="Custom thickness equation", 
                                                               default_equation = "0.3 + 0.8 * x / max(abs(x))", 
                                                               key_prefix="tpms_thickness_eq",
-                                                              size_x=params.size_x, size_y=params.size_y)
+                                                              size_x=params.size_x, size_y=params.size_y, size_z=params.size_z,
+                                                              origin_x=params.origin_x, origin_y=params.origin_y, origin_z=params.origin_z)
             if custom_thickness_equation is None:
                 st.error("Please enter a valid custom thickness equation.")
                 return 1.0
             else:
-                custom_thickness = evaluate_custom_inputs(custom_thickness_equation, params.x, params.y, params.z)
+                custom_thickness = evaluate_custom_inputs(custom_thickness_equation, params.u, params.v, params.w)
                 return custom_thickness
         elif thickness_field_source == "Import from file":
             browse_file(
@@ -309,35 +312,35 @@ def generate_ui_tpms(
     - EquationError raised by evaluate_custom_inputs() is caught internally
       and shown as a Streamlit error message rather than propagating.
     """
-    x, y, z = params.x, params.y, params.z   # physical Cartesian grid, used for meshing
+    #x, y, z = params.x, params.y, params.z   # physical Cartesian grid, used for meshing
     # coordinates the equation is evaluated in (= x, y, z in Cartesian mode)
-    grid_mode = params.grid_mode or "Cartesian"
-    periods = (params.px, params.py, params.pz) if params.implicit_field_source == "Built-in type" else (None, None, None)
+    #grid_mode = params.grid_mode or "Cartesian"
+    #periods = (params.px, params.py, params.pz) if params.implicit_field_source == "Built-in type" else (None, None, None)
     # u, v, w are the coordinates in which the TPMS equation is evaluated, they 
     # are different from x,y,z in the case where we use cylindrical or spherical coordinate sytem.
-    u, v, w = conformal_coords(x, y, z, grid_mode, periods)
+    #params.u, params.v, params.w = conformal_coords(x, y, z, grid_mode, periods)
 
     try:
         with st.spinner("Computing field and generating mesh..."):
             # ----- Built-in type ------
             if params.implicit_field_source == "Built-in type":
-                if grid_mode == "Cartesian":
-                    model = BUILTIN_TYPES[params.type_name](x, y, z, params.px, params.py, params.pz, params.thickness)
+                if params.grid_mode == "Cartesian":
+                    model = BUILTIN_TYPES[params.type_name](params.x, params.y, params.z, params.px, params.py, params.pz, params.thickness)
                 else:
                     # evaluate the TPMS equation in (u, v, w), then hand the field to a
                     # model living on the Cartesian grid (meshing needs a regular box)
-                    curved = BUILTIN_TYPES[params.type_name](u, v, w, params.px, params.py, params.pz, params.thickness)
-                    model = CustomTPMSModel(x, y, z, params.thickness, field=curved._implicit_field())
+                    curved = BUILTIN_TYPES[params.type_name](params.u, params.v, params.w, params.px, params.py, params.pz, params.thickness)
+                    model = CustomTPMSModel(params.x, params.y, params.z, params.thickness, field=curved._implicit_field())
 
             # ----- Custom equation ------
             elif params.implicit_field_source == "Custom equation":
                 # in the equation, x, y, z stand for u, v, w (see conformal_coords)
-                params.field = evaluate_custom_inputs(params.custom_equation, u, v, w)
-                model = CustomTPMSModel(x, y, z, params.thickness, field=params.field)
+                params.field = evaluate_custom_inputs(params.custom_equation, params.u, params.v, params.w)
+                model = CustomTPMSModel(params.x, params.y, params.z, params.thickness, field=params.field)
 
             # ----- Import from file ------
             elif params.implicit_field_source == "Import from file":
-                model = CustomTPMSModel(x, y, z, params.thickness, field=params.field)
+                model = CustomTPMSModel(params.x, params.y, params.z, params.thickness, field=params.field)
 
             # ---- compute density_field ------
             if params.field_mode in SKELETAL_MODES:   # "signed", "signed_inverse"
@@ -427,6 +430,7 @@ def render_period_input(
     axis: str,
     params,
     default: float = 5.0,
+    disable_complex_options: bool = False,
 ) -> Optional[Union[float, np.ndarray]]:
     """
     ============================================================================
@@ -454,12 +458,18 @@ def render_period_input(
     period : float, np.ndarray, or None
     """
     # ------ select source: constant vs imported matrix -----
-    source = st.segmented_control(
-        f"Period {axis}", ["Constant", "Custom", "Import"],
-        default="Constant",
-        key=f"tpms_period_{axis.lower()}_source",
-    )
-
+    if not disable_complex_options:
+        source = st.segmented_control(
+            f"Period {axis}", ["Constant", "Custom", "Import"],
+            default="Constant",
+            key=f"tpms_period_{axis.lower()}_source",
+        )
+    else:
+        source = st.segmented_control(
+            f"Period {axis}", ["Constant"],
+            default="Constant",
+            key=f"tpms_period_{axis.lower()}_source",
+        )
     # ------ if source == constant ------
     if source == "Constant":
         return st.number_input(
@@ -473,14 +483,15 @@ def render_period_input(
             label=f"Custom Period {axis} equation",
             default_equation=f"2.0 + 4.0 * {axis.lower()} / max(abs({axis.lower()}))",
             key_prefix=f"tpms_period_{axis.lower()}_eq",
-            size_x=params.size_x, size_y=params.size_y,
+            size_x=params.size_x, size_y=params.size_y, size_z=params.size_z,
+            origin_x=params.origin_x, origin_y=params.origin_y, origin_z=params.origin_z
         )
         if custom_period_equation is None:
             st.error(f"Please enter a valid custom Period {axis} equation.")
             return 5.0
         else:
             custom_period = evaluate_custom_inputs(
-                custom_period_equation, params.x, params.y, params.z
+                custom_period_equation, params.u, params.v, params.w
             )
             return np.array(custom_period)
 

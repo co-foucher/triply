@@ -138,6 +138,7 @@ BUILTIN_TYPES = {
 # ---- Field modes (label -> TPMSModel.compute_field(mode=...) argument) ----
 from app.components.tpms_source_panel import (
     _adapt_resolution,
+    conformal_coords,
     render_field_mode,
     render_threshold,
     render_thickness,
@@ -175,6 +176,9 @@ class TPMSParams:
     x: np.ndarray = None
     y: np.ndarray = None
     z: np.ndarray = None
+    u: np.ndarray = None
+    v: np.ndarray = None
+    w: np.ndarray = None
     # ----- implicit field definition -----
     implicit_field_source: str = "Built-in type"
     type_name: str = "Gyroid"
@@ -258,6 +262,14 @@ def _make_user_define_parameters(params: TPMSParams):
     params.x, params.y, params.z = make_grid(size_x = params.size_x, size_y = params.size_y, size_z = params.size_z, 
                                              resolution = params.resolution,
                                              origin_x = params.origin_x, origin_y = params.origin_y, origin_z = params.origin_z)
+    if params.implicit_field_source == "Built-in type":
+        period_around_axis_y = st.session_state.get("tpms_py", 5.0)     # .get allows you to set a default value: on the first run, tpmy_py is not yet in session_state
+        period_around_axis_z = st.session_state.get("tpms_pz", 5.0)
+        periods_for_rounding = (None, period_around_axis_y, period_around_axis_z)
+    else:
+        periods_for_rounding = (None, None, None)
+    params.u, params.v, params.w = conformal_coords(
+        params.x, params.y, params.z, params.grid_mode, periods_for_rounding)
     st.divider()
 
     # ------ Implcit field definition ------
@@ -267,11 +279,13 @@ def _make_user_define_parameters(params: TPMSParams):
         params.type_name = st.selectbox("TPMS type", list(BUILTIN_TYPES.keys()), key="tpms_type_name")
         c1, c2, c3 = st.columns(3)
         with c1:
-            params.px = render_period_input(axis = 'X', params = params,)
+            params.px = render_period_input(axis = 'X', params = params, disable_complex_options=False)
         with c2:
-            params.py = render_period_input(axis = 'Y', params = params,)
+            to_disable = params.grid_mode != "Cartesian"
+            params.py = render_period_input(axis = 'Y', params = params, disable_complex_options=to_disable)
         with c3:
-            params.pz = render_period_input(axis = 'Z', params = params,)
+            to_disable = params.grid_mode == "Spherical"
+            params.pz = render_period_input(axis = 'Z', params = params, disable_complex_options=to_disable)
 
     elif params.implicit_field_source == "Custom equation":
         params.custom_equation = render_equation_input(label="Custom implicit surface", size_x=params.size_x, size_y=params.size_y, size_z=params.size_z, key_prefix="tpms_custom_equation")
