@@ -211,3 +211,110 @@ st.caption(
     "The sidebar sets the **output folder** every page reads from and writes "
     "to, and the log level for the toolkit's own messages."
 )
+
+
+# ---- "Going further: the triply library" section (bottom of the page) ----
+# Plain data, like PAGES above: one row per point of comparison between the
+# GUI and the library. Kept short on purpose - it is a teaser, the full
+# library documentation lives in docs/triply.md.
+COMPARISON_TABLE = """
+| | coroforge | triply |
+|---|---|---|
+| **How you use it** | Pages, forms and buttons | Python scripts or notebooks |
+| **Install** | `launcher.bat`, no Python knowledge needed | Python 3.10 + `pip install` |
+| **One structure** | Fastest: live previews while you tune | A few lines of code |
+| **100 variants** | 100 times by hand | One `for` loop |
+| **Graded / custom designs** | What *Field generator* offers | Any NumPy expression |
+| **Speed on many designs** | One at a time | All CPU cores in parallel |
+| **Reproducibility** | Settings saved in json files | The script *is* the record (and goes in git) |
+| **Whole pipeline** | Pass files from page to page | Generate → print check → ABAQUS in one script |
+"""
+
+# One short, runnable snippet per tab. They only use the public API shown
+# in docs/triply.md, so they keep working if the GUI changes.
+CODE_EXAMPLES = {
+    "Parameter sweep": '''\
+import numpy as np
+from triply.TPMS_classes import create_a_gyroid
+
+x, y, z = np.meshgrid(*[np.linspace(0, 10, 128)] * 3, indexing="ij")
+
+# 3 periods x 3 thicknesses = 9 structures, no clicking
+for period in [1.5, 2.0, 2.5]:
+    for thickness in [0.6, 0.8, 1.0]:
+        create_a_gyroid(x, y, z, px=period, py=period, pz=period,
+                        t=thickness,
+                        save_path=f"gyroid_p{period}_t{thickness}")
+''',
+    "Graded design": '''\
+import numpy as np
+from triply.TPMS_classes import GyroidModel
+
+x, y, z = np.meshgrid(*[np.linspace(0, 10, 128)] * 3, indexing="ij")
+
+# Thickness and period can be arrays shaped like the grid:
+# here walls thicken from bottom to top, cells shrink toward the centre
+thickness = 0.4 + 0.8 * z / z.max()
+distance_to_centre = np.sqrt((x - 5) ** 2 + (y - 5) ** 2)
+period = 1.5 + 0.2 * distance_to_centre
+
+model = GyroidModel(x, y, z, px=period, py=period, pz=period,
+                    thickness=thickness)
+model.compute_field()
+model.generate_mesh()
+model.export_stl("graded_gyroid")
+''',
+    "Parallel": '''\
+import itertools
+from concurrent.futures import ProcessPoolExecutor
+import numpy as np
+from triply.TPMS_classes import create_a_gyroid
+
+def build_one_design(design):
+    period, thickness = design
+    x, y, z = np.meshgrid(*[np.linspace(0, 10, 128)] * 3, indexing="ij")
+    name = f"gyroid_p{period}_t{thickness}"
+    is_valid = create_a_gyroid(x, y, z, px=period, py=period, pz=period,
+                               t=thickness, save_path=name)
+    return name, is_valid
+
+if __name__ == "__main__":
+    designs = itertools.product([1.5, 2.0, 2.5], [0.6, 0.8, 1.0])
+    # Every CPU core builds one structure at a time
+    with ProcessPoolExecutor() as pool:
+        for name, is_valid in pool.map(build_one_design, designs):
+            print(name, "OK" if is_valid else "invalid mesh")
+''',
+}
+
+TRIPLY_DOCS_URL = "https://github.com/co-foucher/triply/blob/main/docs/triply.md"
+
+
+# ---- render (appended after the existing captions) ----
+st.divider()
+st.subheader("Going further: the triply library")
+st.write(
+    "coroforge is a front end over **triply**, a Python library. Every "
+    "button on these pages calls a triply function, so anything you do here "
+    "you can also write as a script, and a script can do things a GUI "
+    "can't: loops over hundreds of designs, fields defined by any equation, "
+    "several structures built at once on all CPU cores, and the whole "
+    "pipeline chained without touching a file by hand."
+)
+
+st.link_button("Get started with triply", TRIPLY_DOCS_URL,
+               icon=":material/menu_book:")
+
+comparison_column, code_column = st.columns([1, 1], gap="large")
+with comparison_column:
+    st.markdown(COMPARISON_TABLE)
+    st.caption(
+        "Rule of thumb: explore and tune a design in coroforge, then move to "
+        "triply once you need many variants or a repeatable workflow."
+    )
+with code_column:
+    for tab, (title, code) in zip(st.tabs(list(CODE_EXAMPLES)),
+                                  CODE_EXAMPLES.items()):
+        with tab:
+            st.code(code, language="python")
+
