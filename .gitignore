@@ -13,6 +13,7 @@
 *.sim
 *.prt
 *.lock
+*.json
 
 # now folders
 # environments & caches
