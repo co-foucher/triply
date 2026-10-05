@@ -111,7 +111,7 @@ def render_field_mode() -> str:
 # =====================================================================
 # 3) load_STL
 # =====================================================================
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner="load STL...", max_entries=4)
 def load_STL(stl_path: str) -> tuple[np.ndarray, np.ndarray]:
     """
     ============================================================================
@@ -134,12 +134,23 @@ def load_STL(stl_path: str) -> tuple[np.ndarray, np.ndarray]:
     """
     from stl import mesh
 
+
+    
     # Load the STL file
     your_mesh = mesh.Mesh.from_file(stl_path)
 
+    # each triangle's 3 corners, stacked: (3 * number_of_triangles, 3)
+    triangle_corners = your_mesh.vectors.reshape(-1, 3)
+    # merge identical corners: verts = distinct points,
+    # corner_to_vertex[n] = which distinct point corner n is
+    verts, corner_to_vertex = np.unique(triangle_corners, axis=0, return_inverse=True)
+    # group the corner indices back into triangles (reshape also guards
+    # against NumPy versions that return the inverse as (N, 1))
+    faces = corner_to_vertex.reshape(-1, 3)
+
     # Get the vertices and faces
-    verts = your_mesh.vectors.reshape(-1, 3)
-    faces = np.arange(len(verts)).reshape(-1, 3)
+    #verts = your_mesh.vectors.reshape(-1, 3)
+    #faces = np.arange(len(verts)).reshape(-1, 3)
 
     return verts, faces
 

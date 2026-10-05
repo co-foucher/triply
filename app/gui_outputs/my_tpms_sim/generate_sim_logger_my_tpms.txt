@@ -1,0 +1,9 @@
+2026-10-05 10:55:35,790 - INFO - Current working directory: D:\COFO - HP\03 - Github\triply\app\gui_outputs\my_tpms_sim
+2026-10-05 10:55:35,790 - INFO - loading file : D:\COFO - HP\03 - Github\triply\app\gui_outputs/my_tpms.inp
+2026-10-05 10:55:36,170 - INFO - material assigned: E=300000, nu=0.21, rho=3.9e-09
+2026-10-05 10:55:36,175 - INFO - axis=Z, extent=20.2428, face tolerance=0.202428 (1 %)
+2026-10-05 10:55:36,175 - INFO - bottom face: 391 nodes | top face: 380 nodes
+2026-10-05 10:55:36,182 - INFO - rigid-body pins: node 34866 near (5.05747127532959, 5.05747127532959, -0.114942528307438) (U1, U2) and node 31755 near (1.14942526817322, 5.05747127532959, -0.114943452179432) (U2)
+2026-10-05 10:55:36,187 - INFO - load: total 100 in compression along Z -> -0.263158 per node on 380 nodes
+2026-10-05 10:55:36,367 - INFO - job has been created : D:\COFO - HP\03 - Github\triply\app\gui_outputs\my_tpms_sim/Job-my_tpms.inp
+2026-10-05 10:55:36,368 - INFO - Simulation created successfully.
