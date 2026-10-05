@@ -1,6 +1,9 @@
 from typing import Optional
 
+import numpy as np
 import streamlit as st
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
 
 from triply import viz
 
@@ -21,6 +24,8 @@ _COLORSCALE_FLAGS = {
 0 - (reserved)
 1 - _build_mesh_figure
 2 - render_mesh_preview
+3 - _compute_mesh_info
+4 - _render_mesh_info
 #=====================================================================================================================
 """
 
@@ -66,7 +71,12 @@ def _build_mesh_figure(_faces, verts, selected_flag: str):
 # =====================================================================
 # 2) render_mesh_preview
 # =====================================================================
-def render_mesh_preview(faces, verts, key: str, height: int = 600) -> None:
+def render_mesh_preview(faces,
+                        verts,
+                        key: str,
+                        height: int = 600,
+                        show_info_toggle: bool = True,
+                        length_unit: str = "mesh units") -> None:
     """
     ============================================================================
     2) RENDER_MESH_PREVIEW
@@ -84,6 +94,17 @@ def render_mesh_preview(faces, verts, key: str, height: int = 600) -> None:
         pages/reruns).
     height : int, optional
         Plotly figure height in pixels (default 600).
+    show_info_toggle : bool, optional
+        If True (default), a "Show mesh information" toggle is drawn under
+        the figure. Turning it on computes and displays vertex/face counts,
+        bounding-box size, surface area, volume, watertightness, etc. (see
+        _compute_mesh_info). The toggle is off by default, so nothing is
+        computed unless the user asks for it.
+    length_unit : str, optional
+        Label appended to lengths, areas and volumes (default "mesh units").
+        Purely cosmetic: no conversion is done, the numbers are in whatever
+        unit the vertex coordinates are in (pass "mm" when you know the
+        mesh is in millimetres).
 
     RETURNS
     -------
@@ -108,3 +129,280 @@ def render_mesh_preview(faces, verts, key: str, height: int = 600) -> None:
     fig = _build_mesh_figure(faces, verts, selected_flag)
     fig.update_layout(height=height)
     st.plotly_chart(fig, width="stretch", key=f"{key}_meshfig")
+
+    if show_info_toggle:
+        show_info = st.toggle(
+            "Show mesh information",
+            value=False,
+            key=f"{key}_show_info",
+            help=(
+                "Vertex/face counts, bounding-box size, surface area, "
+                "volume, watertightness, connected bodies, Euler "
+                "characteristic and genus. Computed only while this is on."
+            ),
+        )
+        if show_info:
+            info = _compute_mesh_info(faces, verts)
+            _render_mesh_info(info, key=key, length_unit=length_unit)
+
+
+# =====================================================================
+# 3) _compute_mesh_info
+# =====================================================================
+@st.cache_data(show_spinner="Computing mesh information...", max_entries=8)
+def _compute_mesh_info(_faces, verts) -> dict:
+    """
+    ============================================================================
+    3) _COMPUTE_MESH_INFO
+    Pure, cacheable half of the "Show mesh information" toggle: computes
+    geometric and topological quantities of a triangle mesh. No st.* calls
+    (same split as _build_mesh_figure / render_mesh_preview).
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    _faces : ndarray, shape (F, 3), int
+        Triangle vertex indices. Leading underscore = not hashed by
+        st.cache_data (same convention as _build_mesh_figure: the cache key
+        is the vertex array only).
+    verts : ndarray, shape (N, 3), float
+        Vertex coordinates.
+
+    RETURNS
+    -------
+    info : dict
+        Plain Python ints/floats/bools (so st.cache_data can pickle it):
+        counts, bounding box, area, volume, topology. See the code below
+        for every key and the formula behind it.
+
+    ASSUMPTIONS
+    -----------
+    A1. Faces are triangles and vertices are shared between neighbouring
+        faces (an "indexed" mesh, as produced by marching cubes or
+        trimesh.load). If every triangle had its own 3 copies of the
+        vertices (a "triangle soup"), no edge would be shared and the mesh
+        would be reported as not watertight with one body per triangle.
+    A2. Volume, relative density and genus are only meaningful when the
+        mesh is closed (watertight, A3). They are set to None otherwise.
+    A3. "Watertight" here means: every edge is shared by exactly 2 faces.
+        This is the edge-manifold, closed condition. It does not check for
+        self-intersections.
+    A4. The volume formula assumes consistent face orientation. If all
+        normals point inwards the signed volume is negative; its absolute
+        value is reported and the sign is kept in "signed_volume" so you
+        can see it.
+    """
+    faces = np.asarray(_faces, dtype=np.int64)
+    verts = np.asarray(verts, dtype=np.float64)
+
+    # ------------------------------------------------------------------
+    # Counts
+    # ------------------------------------------------------------------
+    number_of_vertices = int(verts.shape[0])
+    number_of_faces = int(faces.shape[0])
+
+    # Vertices actually used by at least one face. Unreferenced vertices
+    # do not belong to the surface and are excluded from the topology
+    # (Euler characteristic, bodies) below.
+    referenced_vertex_ids = np.unique(faces)
+    number_of_referenced_vertices = int(referenced_vertex_ids.size)
+
+    # ------------------------------------------------------------------
+    # Edges
+    # Each triangle (a, b, c) has 3 edges: (a, b), (b, c), (c, a).
+    # An edge is stored as (smaller index, larger index) so that (a, b) and
+    # (b, a), seen from the two neighbouring triangles, are the same edge.
+    # ------------------------------------------------------------------
+    all_edges = np.concatenate([faces[:, [0, 1]],
+                                faces[:, [1, 2]],
+                                faces[:, [2, 0]]], axis=0)
+    all_edges = np.sort(all_edges, axis=1)
+    unique_edges, faces_per_edge = np.unique(all_edges, axis=0, return_counts=True)
+
+    number_of_edges = int(unique_edges.shape[0])
+    number_of_boundary_edges = int(np.sum(faces_per_edge == 1))      # open border (hole)
+    number_of_non_manifold_edges = int(np.sum(faces_per_edge > 2))   # >2 faces meet on one edge
+    is_watertight = bool(number_of_faces > 0 and np.all(faces_per_edge == 2))
+
+    # ------------------------------------------------------------------
+    # Bounding box (axis-aligned)
+    #   min_k = min_i x_ik,  max_k = max_i x_ik,  L_k = max_k - min_k
+    # computed on the referenced vertices only, so stray unused vertices
+    # do not inflate the box.
+    # ------------------------------------------------------------------
+    surface_verts = verts[referenced_vertex_ids]
+    bounding_box_min = surface_verts.min(axis=0)
+    bounding_box_max = surface_verts.max(axis=0)
+    bounding_box_size = bounding_box_max - bounding_box_min
+    bounding_box_volume = float(np.prod(bounding_box_size))
+
+    # ------------------------------------------------------------------
+    # Surface area
+    # For triangle (v0, v1, v2):  A_t = 1/2 * || (v1 - v0) x (v2 - v0) ||
+    # Total area:                 A   = sum_t A_t
+    # ------------------------------------------------------------------
+    v0 = verts[faces[:, 0]]
+    v1 = verts[faces[:, 1]]
+    v2 = verts[faces[:, 2]]
+    cross_products = np.cross(v1 - v0, v2 - v0)
+    surface_area = float(0.5 * np.linalg.norm(cross_products, axis=1).sum())
+
+    # ------------------------------------------------------------------
+    # Enclosed volume (divergence theorem)
+    # Each triangle and the origin form a tetrahedron of signed volume
+    #     V_t = 1/6 * v0 . (v1 x v2)
+    # For a closed, consistently oriented surface the contributions outside
+    # the solid cancel and  V = sum_t V_t  (independent of the origin).
+    # ------------------------------------------------------------------
+    if is_watertight:
+        signed_volume = float(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0)
+        volume = abs(signed_volume)
+        # Relative density (solid volume fraction of the bounding box):
+        #     rho* = V / (L_x * L_y * L_z)
+        relative_density = volume / bounding_box_volume if bounding_box_volume > 0 else None
+    else:
+        signed_volume = None
+        volume = None
+        relative_density = None
+
+    # ------------------------------------------------------------------
+    # Connected bodies
+    # Graph: nodes = vertices, links = unique edges. Each connected set of
+    # referenced vertices is one body (a separate piece of the mesh).
+    # Unreferenced vertices form isolated 1-node groups; they are dropped
+    # by counting only the labels of referenced vertices.
+    # ------------------------------------------------------------------
+    adjacency = coo_matrix(
+        (np.ones(number_of_edges, dtype=np.int8), (unique_edges[:, 0], unique_edges[:, 1])),
+        shape=(number_of_vertices, number_of_vertices),
+    )
+    _, vertex_labels = connected_components(adjacency, directed=False)
+    number_of_bodies = int(np.unique(vertex_labels[referenced_vertex_ids]).size)
+
+    # ------------------------------------------------------------------
+    # Topology
+    # Euler characteristic:  chi = V - E + F   (V = referenced vertices)
+    # For a closed orientable surface made of C bodies with genus g_i each,
+    #     chi = sum_i (2 - 2 g_i) = 2 C - 2 g    with  g = sum_i g_i
+    # so the total genus (number of "handles"/tunnels) is
+    #     g = C - chi / 2
+    # Only valid when the mesh is watertight (A2).
+    # ------------------------------------------------------------------
+    euler_characteristic = number_of_referenced_vertices - number_of_edges + number_of_faces
+    total_genus = (number_of_bodies - euler_characteristic // 2) if is_watertight else None
+
+    return {
+        "number_of_vertices": number_of_vertices,
+        "number_of_referenced_vertices": number_of_referenced_vertices,
+        "number_of_faces": number_of_faces,
+        "number_of_edges": number_of_edges,
+        "number_of_boundary_edges": number_of_boundary_edges,
+        "number_of_non_manifold_edges": number_of_non_manifold_edges,
+        "is_watertight": is_watertight,
+        "bounding_box_min": [float(value) for value in bounding_box_min],
+        "bounding_box_max": [float(value) for value in bounding_box_max],
+        "bounding_box_size": [float(value) for value in bounding_box_size],
+        "bounding_box_volume": bounding_box_volume,
+        "surface_area": surface_area,
+        "signed_volume": signed_volume,
+        "volume": volume,
+        "relative_density": relative_density,
+        "number_of_bodies": number_of_bodies,
+        "euler_characteristic": int(euler_characteristic),
+        "total_genus": None if total_genus is None else int(total_genus),
+    }
+
+
+# =====================================================================
+# 4) _render_mesh_info
+# =====================================================================
+def _render_mesh_info(info: dict, key: str, length_unit: str = "mesh units") -> None:
+    """
+    ============================================================================
+    4) _RENDER_MESH_INFO
+    Thin, uncached UI half: displays the dict returned by
+    _compute_mesh_info() as metrics + a downloadable table.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    info : dict
+        Output of _compute_mesh_info().
+    key : str
+        Same key as render_mesh_preview (used for the download button key).
+    length_unit : str, optional
+        Unit label only, no conversion (see render_mesh_preview).
+
+    RETURNS
+    -------
+    None
+    """
+    def format_optional(value, number_format: str = "{:.4g}") -> str:
+        # Volume, density and genus are None for open meshes (assumption A2).
+        return "n/a (not watertight)" if value is None else number_format.format(value)
+
+    size_x, size_y, size_z = info["bounding_box_size"]
+
+    # --- Counts ---------------------------------------------------------
+    count_columns = st.columns(4)
+    count_columns[0].metric("Vertices", f"{info['number_of_vertices']:,}")
+    count_columns[1].metric("Faces", f"{info['number_of_faces']:,}")
+    count_columns[2].metric("Edges", f"{info['number_of_edges']:,}")
+    count_columns[3].metric("Bodies", f"{info['number_of_bodies']:,}")
+
+    # --- Size -----------------------------------------------------------
+    size_columns = st.columns(3)
+    size_columns[0].metric(f"Size X [{length_unit}]", f"{size_x:.4g}")
+    size_columns[1].metric(f"Size Y [{length_unit}]", f"{size_y:.4g}")
+    size_columns[2].metric(f"Size Z [{length_unit}]", f"{size_z:.4g}")
+
+    # --- Area / volume --------------------------------------------------
+    measure_columns = st.columns(3)
+    measure_columns[0].metric(f"Surface area [{length_unit}²]", f"{info['surface_area']:.4g}")
+    measure_columns[1].metric(f"Volume [{length_unit}³]", format_optional(info["volume"]))
+    measure_columns[2].metric(
+        "Relative density",
+        format_optional(info["relative_density"], "{:.2%}"),
+        help="Solid volume / bounding-box volume (Lx·Ly·Lz).",
+    )
+
+    # --- Topology / health ----------------------------------------------
+    if info["is_watertight"]:
+        st.success(
+            f"Watertight: every edge is shared by exactly 2 faces. "
+            f"Euler characteristic χ = V − E + F = {info['euler_characteristic']}, "
+            f"total genus g = bodies − χ/2 = {info['total_genus']}."
+        )
+        if info["signed_volume"] is not None and info["signed_volume"] < 0:
+            st.warning("Signed volume is negative: face normals point inwards (flipped orientation).")
+    else:
+        st.warning(
+            f"Not watertight: {info['number_of_boundary_edges']:,} boundary edge(s) "
+            f"(holes) and {info['number_of_non_manifold_edges']:,} non-manifold edge(s). "
+            f"Volume, relative density and genus are not computed."
+        )
+
+    if info["number_of_referenced_vertices"] != info["number_of_vertices"]:
+        unused = info["number_of_vertices"] - info["number_of_referenced_vertices"]
+        st.caption(f"{unused:,} vertex/vertices are not used by any face (ignored for size and topology).")
+
+    # --- Full table + download -----------------------------------------
+    with st.expander("All values"):
+        table_rows = []
+        for name, value in info.items():
+            # Lists (bounding box min/max/size) are shown as "x, y, z".
+            if isinstance(value, list):
+                value = ", ".join(f"{component:.6g}" for component in value)
+            table_rows.append({"quantity": name, "value": str(value)})
+        st.dataframe(table_rows, hide_index=True, width="stretch")
+
+        csv_text = "quantity,value\n" + "\n".join(
+            f"{row['quantity']},\"{row['value']}\"" for row in table_rows
+        )
+        st.download_button(
+            "Download as CSV",
+            data=csv_text,
+            file_name="mesh_info.csv",
+            mime="text/csv",
+            key=f"{key}_mesh_info_download",
+        )
