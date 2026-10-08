@@ -174,26 +174,9 @@ def _compute_mesh_info(_faces, verts) -> dict:
         Plain Python ints/floats/bools (so st.cache_data can pickle it):
         counts, bounding box, area, volume, topology. See the code below
         for every key and the formula behind it.
-
-    ASSUMPTIONS
-    -----------
-    A1. Faces are triangles and vertices are shared between neighbouring
-        faces (an "indexed" mesh, as produced by marching cubes or
-        trimesh.load). If every triangle had its own 3 copies of the
-        vertices (a "triangle soup"), no edge would be shared and the mesh
-        would be reported as not watertight with one body per triangle.
-    A2. Volume, relative density and genus are only meaningful when the
-        mesh is closed (watertight, A3). They are set to None otherwise.
-    A3. "Watertight" here means: every edge is shared by exactly 2 faces.
-        This is the edge-manifold, closed condition. It does not check for
-        self-intersections.
-    A4. The volume formula assumes consistent face orientation. If all
-        normals point inwards the signed volume is negative; its absolute
-        value is reported and the sign is kept in "signed_volume" so you
-        can see it.
     """
-    faces = np.asarray(_faces, dtype=np.int64)
-    verts = np.asarray(verts, dtype=np.float64)
+    faces = np.asarray(_faces, dtype=np.int64)  # Nx3 array of vertex indices (triangles)
+    verts = np.asarray(verts, dtype=np.float64) # Mx3 array of vertex coordinates (x, y, z)
 
     # ------------------------------------------------------------------
     # Counts
@@ -201,34 +184,31 @@ def _compute_mesh_info(_faces, verts) -> dict:
     number_of_vertices = int(verts.shape[0])
     number_of_faces = int(faces.shape[0])
 
-    # Vertices actually used by at least one face. Unreferenced vertices
-    # do not belong to the surface and are excluded from the topology
-    # (Euler characteristic, bodies) below.
+    # Vertices actually used by at least one face. 
     referenced_vertex_ids = np.unique(faces)
     number_of_referenced_vertices = int(referenced_vertex_ids.size)
 
     # ------------------------------------------------------------------
     # Edges
-    # Each triangle (a, b, c) has 3 edges: (a, b), (b, c), (c, a).
-    # An edge is stored as (smaller index, larger index) so that (a, b) and
-    # (b, a), seen from the two neighbouring triangles, are the same edge.
     # ------------------------------------------------------------------
-    all_edges = np.concatenate([faces[:, [0, 1]],
-                                faces[:, [1, 2]],
-                                faces[:, [2, 0]]], axis=0)
-    all_edges = np.sort(all_edges, axis=1)
+    # grab all 3 edges of each triangle.
+    all_edges = np.concatenate([faces[:, [0, 1]],   # the first two vertices
+                                faces[:, [1, 2]],   # the second and third vertices
+                                faces[:, [2, 0]]],  # the third and first vertices
+                                axis=0)     #axis=0 means concatenate vertically, so we get a (3F, 2) array of edges
+    # sort each edge so that the smaller index comes first (makes it easier to find unique edges)
+    all_edges = np.sort(all_edges, axis=1)  # here you sort on the second axis !
+    # find unique edges and how many faces share each edge (faces_per_edge)
     unique_edges, faces_per_edge = np.unique(all_edges, axis=0, return_counts=True)
 
     number_of_edges = int(unique_edges.shape[0])
     number_of_boundary_edges = int(np.sum(faces_per_edge == 1))      # open border (hole)
     number_of_non_manifold_edges = int(np.sum(faces_per_edge > 2))   # >2 faces meet on one edge
-    is_watertight = bool(number_of_faces > 0 and np.all(faces_per_edge == 2))
+    # Watertightness: every edge is shared by exactly 2 faces (no holes, no non-manifold edges)
+    is_watertight = bool(number_of_faces > 0 and np.all(faces_per_edge == 2))   #np.all returns a bool, true if all edges are shared by exactly 2 faces, false otherwise
 
     # ------------------------------------------------------------------
     # Bounding box (axis-aligned)
-    #   min_k = min_i x_ik,  max_k = max_i x_ik,  L_k = max_k - min_k
-    # computed on the referenced vertices only, so stray unused vertices
-    # do not inflate the box.
     # ------------------------------------------------------------------
     surface_verts = verts[referenced_vertex_ids]
     bounding_box_min = surface_verts.min(axis=0)
@@ -238,8 +218,6 @@ def _compute_mesh_info(_faces, verts) -> dict:
 
     # ------------------------------------------------------------------
     # Surface area
-    # For triangle (v0, v1, v2):  A_t = 1/2 * || (v1 - v0) x (v2 - v0) ||
-    # Total area:                 A   = sum_t A_t
     # ------------------------------------------------------------------
     v0 = verts[faces[:, 0]]
     v1 = verts[faces[:, 1]]
@@ -265,32 +243,6 @@ def _compute_mesh_info(_faces, verts) -> dict:
         volume = None
         relative_density = None
 
-    # ------------------------------------------------------------------
-    # Connected bodies
-    # Graph: nodes = vertices, links = unique edges. Each connected set of
-    # referenced vertices is one body (a separate piece of the mesh).
-    # Unreferenced vertices form isolated 1-node groups; they are dropped
-    # by counting only the labels of referenced vertices.
-    # ------------------------------------------------------------------
-    adjacency = coo_matrix(
-        (np.ones(number_of_edges, dtype=np.int8), (unique_edges[:, 0], unique_edges[:, 1])),
-        shape=(number_of_vertices, number_of_vertices),
-    )
-    _, vertex_labels = connected_components(adjacency, directed=False)
-    number_of_bodies = int(np.unique(vertex_labels[referenced_vertex_ids]).size)
-
-    # ------------------------------------------------------------------
-    # Topology
-    # Euler characteristic:  chi = V - E + F   (V = referenced vertices)
-    # For a closed orientable surface made of C bodies with genus g_i each,
-    #     chi = sum_i (2 - 2 g_i) = 2 C - 2 g    with  g = sum_i g_i
-    # so the total genus (number of "handles"/tunnels) is
-    #     g = C - chi / 2
-    # Only valid when the mesh is watertight (A2).
-    # ------------------------------------------------------------------
-    euler_characteristic = number_of_referenced_vertices - number_of_edges + number_of_faces
-    total_genus = (number_of_bodies - euler_characteristic // 2) if is_watertight else None
-
     return {
         "number_of_vertices": number_of_vertices,
         "number_of_referenced_vertices": number_of_referenced_vertices,
@@ -307,16 +259,15 @@ def _compute_mesh_info(_faces, verts) -> dict:
         "signed_volume": signed_volume,
         "volume": volume,
         "relative_density": relative_density,
-        "number_of_bodies": number_of_bodies,
-        "euler_characteristic": int(euler_characteristic),
-        "total_genus": None if total_genus is None else int(total_genus),
     }
 
 
 # =====================================================================
 # 4) _render_mesh_info
 # =====================================================================
-def _render_mesh_info(info: dict, key: str, length_unit: str = "mesh units") -> None:
+def _render_mesh_info(info: dict, 
+                      key: str, 
+                      length_unit: str = "mesh units") -> None:
     """
     ============================================================================
     4) _RENDER_MESH_INFO
@@ -338,17 +289,16 @@ def _render_mesh_info(info: dict, key: str, length_unit: str = "mesh units") -> 
     None
     """
     def format_optional(value, number_format: str = "{:.4g}") -> str:
-        # Volume, density and genus are None for open meshes (assumption A2).
+        # Volume, density and genus are None for open meshes.
         return "n/a (not watertight)" if value is None else number_format.format(value)
 
     size_x, size_y, size_z = info["bounding_box_size"]
 
     # --- Counts ---------------------------------------------------------
-    count_columns = st.columns(4)
+    count_columns = st.columns(3)
     count_columns[0].metric("Vertices", f"{info['number_of_vertices']:,}")
     count_columns[1].metric("Faces", f"{info['number_of_faces']:,}")
     count_columns[2].metric("Edges", f"{info['number_of_edges']:,}")
-    count_columns[3].metric("Bodies", f"{info['number_of_bodies']:,}")
 
     # --- Size -----------------------------------------------------------
     size_columns = st.columns(3)
@@ -370,8 +320,6 @@ def _render_mesh_info(info: dict, key: str, length_unit: str = "mesh units") -> 
     if info["is_watertight"]:
         st.success(
             f"Watertight: every edge is shared by exactly 2 faces. "
-            f"Euler characteristic χ = V − E + F = {info['euler_characteristic']}, "
-            f"total genus g = bodies − χ/2 = {info['total_genus']}."
         )
         if info["signed_volume"] is not None and info["signed_volume"] < 0:
             st.warning("Signed volume is negative: face normals point inwards (flipped orientation).")
@@ -404,5 +352,4 @@ def _render_mesh_info(info: dict, key: str, length_unit: str = "mesh units") -> 
             data=csv_text,
             file_name="mesh_info.csv",
             mime="text/csv",
-            key=f"{key}_mesh_info_download",
         )

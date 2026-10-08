@@ -437,7 +437,6 @@ with col_preview:
 with col_preview:
     if model is not None and model.faces is not None:
         name = st.text_input("File name", value="my_tpms", key="tpms_file_name")
-
         # ----- Export STL ------
         if st.button("Export STL"):
             out_path = get_output_dir() / name
