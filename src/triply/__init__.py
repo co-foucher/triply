@@ -47,6 +47,7 @@ from .logger import logger, set_log_level
 # --- Public submodules (lazy) --------------------------------------------------
 # name -> dotted import target, relative to this package (see __getattr__).
 _LAZY_SUBMODULES = {
+    "adaptive_meshing": ".adaptive_meshing",
     "mesh_tools": ".mesh_tools",
     "viz": ".viz",
     "io_ops": ".io_ops",

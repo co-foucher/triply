@@ -13,6 +13,8 @@ key_prefix passed to it; they don't appear literally in this file.
 
 Grid parameters (page)
     tpms_resolution                       slider         grid resolution
+    tpms_adaptive_resolution              toggle         adaptive resolution on/off
+    tpms_number_of_subdivisions           number_input   number of refinement steps (adaptive resolution)
     tpms_size_x, tpms_size_y, tpms_size_z number_input   grid size
 
 Implicit field (page + tpms_source_panel.render_period_input)
@@ -48,6 +50,7 @@ Baseplates and combine (page)
 Mesh parameters (page)
     tpms_auto_smooth                      checkbox       auto-smooth on/off
     tpms_smoothing_factor                 slider         smoothing factor
+    tpms_number_of_smoothing_passes       slider         number of smoothing passes
     tpms_simplification_factor            slider         fraction of faces kept
     tpms_max_faces                        checkbox       limit faces on/off
     tpms_max_faces_count                  number_input   maximum faces
@@ -79,7 +82,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import numpy as np
 import streamlit as st
@@ -148,6 +151,7 @@ from app.components.tpms_source_panel import (
     render_period_input,
     make_grid,
     documentation_cyl_and_sphere_systems,
+    render_smoothing_preview,
 )
 
 #dataclasses is a decorator from Python's standard library that turns a plain class into a lightweight data container: 
@@ -168,6 +172,8 @@ class TPMSParams:
     size_x: float = 10.0
     size_y: float = 10.0
     size_z: float = 10.0
+    adaptive_resolution: bool = False
+    number_of_subdivisions: int = 1
     origin_x: float = 0.0
     origin_y: float = 0.0
     origin_z: float = 0.0
@@ -185,6 +191,9 @@ class TPMSParams:
     px: Union[float, np.ndarray] = 5.0
     py: Union[float, np.ndarray] = 5.0
     pz: Union[float, np.ndarray] = 5.0
+    px_function: Optional[Callable] = None     # period as a function of position ("Custom" source only), for adaptive meshing
+    py_function: Optional[Callable] = None
+    pz_function: Optional[Callable] = None
     custom_equation: str = None
     field: np.ndarray = None
     # ----- solid definition -----
@@ -203,6 +212,7 @@ class TPMSParams:
     max_faces: bool = False
     max_faces_count: int = 100000
     auto_smooth: bool = True
+    number_of_smoothing_passes:int = 10
     smoothing_factor: float = 0.9
 
 
@@ -243,6 +253,20 @@ def _make_user_define_parameters(params: TPMSParams):
         key="tpms_resolution",
         help="Higher = finer surface but slower generation. Start low (~48-64) while iterating.",
     )
+    # ------ adaptive resolution: toggle and number of subdivisions side by side ------
+    col_adaptive, col_subdivisions = st.columns(2, vertical_alignment="bottom")
+    with col_adaptive:
+        params.adaptive_resolution = st.toggle(
+            "Adaptive resolution", value=False, key="tpms_adaptive_resolution",
+            help="Refine the grid only around the surface: the grid resolution above becomes the coarse grid, "
+                 "and the cells containing the surface are halved 'Number of subdivisions' times. "
+                 "Not compatible with the Distance field mode.")
+    with col_subdivisions:
+        # greyed out (but kept visible) while adaptive resolution is off
+        params.number_of_subdivisions = st.number_input(
+            "Number of subdivisions", min_value=1, max_value=5, value=1, step=1,
+            key="tpms_number_of_subdivisions",
+            disabled=not params.adaptive_resolution)
     params.grid_mode = st.segmented_control(
         "Grid mode", ["Cartesian", "Cylindrical", "Spherical"],
         default=params.grid_mode,
@@ -279,13 +303,13 @@ def _make_user_define_parameters(params: TPMSParams):
         params.type_name = st.selectbox("TPMS type", list(BUILTIN_TYPES.keys()), key="tpms_type_name")
         c1, c2, c3 = st.columns(3)
         with c1:
-            params.px = render_period_input(axis = 'X', params = params, disable_complex_options=False)
+            params.px, params.px_function = render_period_input(axis = 'X', params = params, disable_complex_options=False)
         with c2:
             to_disable = params.grid_mode != "Cartesian"
-            params.py = render_period_input(axis = 'Y', params = params, disable_complex_options=to_disable)
+            params.py, params.py_function = render_period_input(axis = 'Y', params = params, disable_complex_options=to_disable)
         with c3:
             to_disable = params.grid_mode == "Spherical"
-            params.pz = render_period_input(axis = 'Z', params = params, disable_complex_options=to_disable)
+            params.pz, params.pz_function = render_period_input(axis = 'Z', params = params, disable_complex_options=to_disable)
 
     elif params.implicit_field_source == "Custom equation":
         params.custom_equation = render_equation_input(label="Custom implicit surface", size_x=params.size_x, size_y=params.size_y, size_z=params.size_z, key_prefix="tpms_custom_equation")
@@ -346,14 +370,31 @@ def _make_user_define_parameters(params: TPMSParams):
     # ----- mesh parameters ------
     #smoothing
     st.subheader("Mesh parameters")
-    params.auto_smooth = st.checkbox("Auto-smooth mesh", value=params.auto_smooth,
-            key="tpms_auto_smooth",
-            help="If checked, the mesh is smoothed after simplification and again after fixing.")
-    if params.auto_smooth:
-        params.smoothing_factor = st.slider(
-            "Smoothing factor", 0.0, 1.0, params.smoothing_factor, step=0.01,
-            key="tpms_smoothing_factor",
-            help="Passed to TPMSModel.smooth_mesh(smoothing_factor=...). Higher = more smoothing.")
+    col_1, col_2 = st.columns([1, 4])
+    with col_1:
+        params.auto_smooth = st.toggle("Auto-smooth mesh", value=params.auto_smooth,
+                key="tpms_auto_smooth",
+                help="On: the number of smoothing passes is chosen automatically. ")
+    with col_2:
+        params.number_of_smoothing_passes = st.slider(
+            "smoothing passes", min_value=1, max_value=100, value=params.number_of_smoothing_passes, step=1,
+            key="tpms_number_of_smoothing_passes",
+            disabled = params.auto_smooth)
+    params.smoothing_factor = st.slider(
+        "Smoothing factor", 0.0, 1.0, params.smoothing_factor, step=0.01,
+        key="tpms_smoothing_factor",
+        help=("Removes the small, voxel-sized roughness left by meshing, "
+            "without shrinking the part.\n\n"
+            "- **0**: no smoothing.\n"
+            "- **0.25**: light, removes only the finest grain (2-3 voxels wide).\n"
+            "- **0.5**: medium, also softens bumps about 4 voxels wide.\n"
+            "- **1**: strongest, also rounds off details about 4-6 voxels wide.\n\n"
+            "Shapes wider than about 14 voxels (walls, pores, overall size) "
+            "are never changed, whatever the value. "
+            "If thin or sharp details look washed out, lower the value."),
+        )   
+        # live chart: which feature widths this smoothing factor removes / keeps
+    render_smoothing_preview(params.smoothing_factor, number_of_passes=params.number_of_smoothing_passes)
     # simplification
     params.simplification_factor = st.slider(
         "Mesh simplification (fraction of faces kept)", 0.1, 1.0, params.simplification_factor,
@@ -434,40 +475,61 @@ with col_preview:
 # ==========================================================
 # ================ save outputs section ====================
 # ==========================================================
-with col_preview:
-    if model is not None and model.faces is not None:
-        name = st.text_input("File name", value="my_tpms", key="tpms_file_name")
-        # ----- Export STL ------
-        if st.button("Export STL"):
-            out_path = get_output_dir() / name
-            model.export_stl(str(out_path))
-            model.save_mesh_preview(str(out_path))  # keep an .html alongside the .stl, picked up by the Library page
-            st.success(f"Saved {out_path}.stl (+ preview .html)")
+# Each exporter writes one file and returns (status, message), where status is
+# the Streamlit function used to report it: "success", "warning" or "error".
+# Plain functions keep the buttons one-liners and let "Export all" call all three.
 
-        # ----- Export TPMS field ------
-        if st.button("Export TPMS implicit field (.npy)"):
-            out_path = get_output_dir() / name
-            if model.implicit_field is None: # check if  field exists
-                st.warning("No TPMS field available to export. Please ensure that the model field exists before exporting.")
-            np.save(str(out_path) + ".npy", model.implicit_field)
-            st.success(f"Saved {out_path}.npy")
+def _export_stl(model, name):
+    out_path = get_output_dir() / name
+    model.export_stl(str(out_path))
+    model.save_mesh_preview(str(out_path))  # keep an .html alongside the .stl, picked up by the Library page
+    return "success", f"Saved {out_path}.stl (+ preview .html)"
 
-        # ----- Export TPMS thickness field ------
-        if st.button("Export TPMS thickness field (.npy)"):
-            out_path = get_output_dir() / (name + "_thickness")
-            if model.thickness is None: # check if thickness field exists
-                st.error("No thickness field available to export. Please ensure that the model has a thickness field before exporting.")
-            elif isinstance(model.thickness, float): #check if thickness field is a float
-                st.warning("Thickness field is a float, not an array...")
-                np.save(str(out_path) + ".npy", np.array([model.thickness])) #save as a 1D array
-                st.success(f"Saved {out_path}.npy")
-            elif isinstance(model.thickness, np.ndarray) and model.thickness.ndim == 3: #check if thickness field is a 3D array
-                np.save(str(out_path) + ".npy", model.thickness)
-                st.success(f"Saved {out_path}.npy")
-            else:
-                st.error("Thickness field is not a valid 3D array. Please ensure that the model's thickness field is a valid 3D array before exporting.")
-    else:
-        st.info("Set parameters and click Generate.")
+
+def _export_implicit_field(model, name):
+    if model.implicit_field is None:
+        return "warning", "No implicit field to export."
+    out_path = get_output_dir() / f"{name}.npy"
+    np.save(out_path, model.implicit_field)
+    return "success", f"Saved {out_path}"
+
+
+def _export_thickness_field(model, name):
+    thickness = model.thickness
+    out_path = get_output_dir() / f"{name}_thickness.npy"
+    if thickness is None:
+        return "error", "No thickness field to export."
+    if isinstance(thickness, float):
+        np.save(out_path, np.array([thickness]))  # constant thickness, saved as a 1-element array
+        return "warning", f"Thickness is constant ({thickness}), saved as a 1-element array: {out_path}"
+    if isinstance(thickness, np.ndarray) and thickness.ndim == 3:
+        np.save(out_path, thickness)
+        return "success", f"Saved {out_path}"
+    return "error", "Thickness field is not a valid 3D array, nothing saved."
+
+
+# Full page width, below the two columns
+st.divider()
+st.subheader("Export")
+if model is not None and model.faces is not None:
+    with st.container(border=True):
+        name = st.text_input("File name", value="my_tpms", key="tpms_file_name",
+                             help=f"Files are written to {get_output_dir()}")
+        col_stl, col_field, col_thickness, col_all = st.columns(4)
+        exporters = []  # what the clicked button asks for (at most one button is clicked per rerun)
+        if col_stl.button("STL mesh", icon=":material/deployed_code:", width="stretch"):
+            exporters = [_export_stl]
+        if col_field.button("Implicit field (.npy)", icon=":material/grid_on:", width="stretch"):
+            exporters = [_export_implicit_field]
+        if col_thickness.button("Thickness field (.npy)", icon=":material/line_weight:", width="stretch"):
+            exporters = [_export_thickness_field]
+        if col_all.button("Export all", type="primary", icon=":material/download:", width="stretch"):
+            exporters = [_export_stl, _export_implicit_field, _export_thickness_field]
+        for exporter in exporters:
+            status, message = exporter(model, name)
+            getattr(st, status)(message)  # e.g. st.success(message)
+else:
+    st.info("Set parameters and click Generate.")
 
 # save every tpms_ widget value so the page comes back as it was left (see app.components.page_state)
 mirror_widget_state("tpms_", exclude_suffixes=TPMS_NOT_MIRRORED_SUFFIXES)

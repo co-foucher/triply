@@ -613,6 +613,32 @@ def _is_mesh_fixed(verts: np.ndarray, faces: np.ndarray) -> bool:
 #=====================================================================
 #8) smooth_mesh
 #=====================================================================
+
+def _taubin_coefficients_from_strength(strength: float,
+                                      passband_frequency: float = 0.1,
+                                      maximum_frequency: float = 2.0):
+    """
+    Map a smoothing strength in [0, 1] to Taubin's (lambda, mu).
+
+    strength = fraction of the highest-frequency noise removed per iteration:
+        f(maximum_frequency) = 1 - strength
+    while the shape is preserved:
+        f(passband_frequency) = 1
+    with f(k) = (1 - lambda*k) * (1 - mu*k) the per-iteration gain of a mode of frequency k.
+    strength = 1 gives Open3D's defaults (0.5, -0.526).
+    """
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("strength must be between 0 and 1.")
+    frequency_ratio = passband_frequency / maximum_frequency          # q
+    # positive root of (1 - q) x^2 + strength*q*x - strength = 0, with x = lambda * maximum_frequency
+    scaled_lambda = (-strength * frequency_ratio
+                     + np.sqrt((strength * frequency_ratio) ** 2
+                               + 4.0 * (1.0 - frequency_ratio) * strength)) / (2.0 * (1.0 - frequency_ratio))
+    lambda_factor = scaled_lambda / maximum_frequency
+    # passband condition 1/lambda + 1/mu = passband_frequency
+    mu_factor = lambda_factor / (passband_frequency * lambda_factor - 1.0)
+    return lambda_factor, mu_factor
+
 def smooth_mesh(verts: np.ndarray, faces: np.ndarray, smoothing_factor:float=0.1, iterations:int=10):
     """
     ============================================================================
@@ -645,13 +671,17 @@ def smooth_mesh(verts: np.ndarray, faces: np.ndarray, smoothing_factor:float=0.1
     faces : (M, 3) ndarray
         Unchanged triangle face connectivity.
     """
+    lambda_factor, mu_factor = _taubin_coefficients_from_strength(strength = smoothing_factor,
+                                      passband_frequency = 0.1,
+                                      maximum_frequency = 2.0)
     import open3d as o3d
     o3d_mesh = o3d.geometry.TriangleMesh()
     o3d_mesh.vertices = o3d.utility.Vector3dVector(verts)
     o3d_mesh.triangles = o3d.utility.Vector3iVector(faces)
     o3d_mesh = o3d_mesh.filter_smooth_taubin(
         number_of_iterations=iterations,
-        lambda_filter=smoothing_factor
+        lambda_filter=lambda_factor,
+        mu=mu_factor,
     )
     #https://graphics.stanford.edu/courses/cs468-01-fall/Papers/taubin-smoothing.pdf
     return np.asarray(o3d_mesh.vertices), np.asarray(o3d_mesh.triangles)

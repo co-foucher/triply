@@ -14,6 +14,7 @@ from .logger import logger
 5 - _REORIENT_VOXEL_GRID
 6 - find_optimal_orientation
 7 - interpolate_voxel_grid
+8 - field_to_function
 #=====================================================================================================================
 """
 
@@ -613,4 +614,35 @@ def interpolate_voxel_grid(voxel_grid: np.ndarray,
     return interpolated_grid
 
 
+# =====================================================================
+# 8) field_to_function
+# =====================================================================
+def field_to_function(field, x, y, z, order=3):
+    """
+    Turns a field known only on a regular 'ij' meshgrid into a function f(x, y, z)
+    that can be evaluated anywhere, e.g. to pass to set_point_function().
+    order = 1: trilinear (exact for linear fields); order = 3: cubic B-spline (smooth gradients).
+    Outside the box, the value of the nearest face is used.
+    """
+    from scipy.ndimage import map_coordinates, spline_filter
+    # position of the first grid point, and grid spacing along each axis
+    origin = (x[0, 0, 0], y[0, 0, 0], z[0, 0, 0])
+    spacing = (x[1, 0, 0] - x[0, 0, 0], y[0, 1, 0] - y[0, 0, 0], z[0, 0, 1] - z[0, 0, 0])
 
+    # cubic: solve once for the spline coefficients so the spline passes through the samples
+    if order > 1:
+        coefficients = spline_filter(field.astype(float), order=order, mode="nearest")
+    else:
+        coefficients = field.astype(float)
+
+    def function(points_x, points_y, points_z):
+        # physical position -> fractional grid index along each axis
+        index_x = (np.asarray(points_x) - origin[0]) / spacing[0]
+        index_y = (np.asarray(points_y) - origin[1]) / spacing[1]
+        index_z = (np.asarray(points_z) - origin[2]) / spacing[2]
+        values = map_coordinates(coefficients,
+                                 [index_x.ravel(), index_y.ravel(), index_z.ravel()],
+                                 order=order, mode="nearest", prefilter=False)
+        return values.reshape(np.shape(points_x))
+
+    return function

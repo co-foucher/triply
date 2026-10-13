@@ -384,7 +384,83 @@ def evaluate_custom_inputs(equation: str,
     field = evaluate_equation(equation, x, y, z)
     return field
 
+# =====================================================================
+# 6b) create_the_function_that_evaluates_the_field_at_any_point
+# =====================================================================
+def make_field_function(equation: str,
+                                                              grid_x: np.ndarray,
+                                                              grid_y: np.ndarray,
+                                                              grid_z: np.ndarray) -> Callable:
+    """
+    ============================================================================
+    6b) make_field_function
+    Turns an equation (text) into a Python function that gives the field at
+    ANY points, with the same meaning as on the full grid.
 
+    NECESSARY because max(...) / min(...) functions are not definted localy: 
+    asking the values at one point without giving the whole field size is not possible.
+    For adaptive resolution, we need to be able to evaluate the field at any point INDEPENDATLY
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    equation : str
+        The formula text (see parse_equation for what is allowed).
+    grid_x, grid_y, grid_z : np.ndarray
+        The full generation grid that max/min are meant over.
+
+    RETURNS
+    -------
+    field_at_points : callable
+        field_at_points(x, y, z) -> np.ndarray of the same shape as x,
+        for x, y, z of any shape.
+
+    EXAMPLE
+    -------
+    >>> field_at_points = make_field_function(
+    ...     "0.3 + 0.8 * x / max(abs(x))", grid_x, grid_y, grid_z)   # max(abs(x)) -> 10 on a -10..10 grid
+    >>> field_at_points(np.array([5.0]), np.array([0.0]), np.array([0.0]))
+    array([0.7])                                                     # 0.3 + 0.8 * 5 / 10
+    """
+    # 1) Text -> sympy formula 
+    formula, _ = parse_equation(equation)
+    variables = [sp.Symbol(name) for name in _ALLOWED_SYMBOLS]          # the symbols x, y, z
+
+    # which numpy reduction each piece stands for
+    numpy_reduction_of = {_ReduceOrCompareMax: np.max, _ReduceOrCompareMin: np.min}
+
+    # 2) Replace every max/min piece by its value on the full grid.
+    while True:
+        # all max/min pieces in the formula ...
+        all_reduction_pieces = formula.atoms(_ReduceOrCompareMax, _ReduceOrCompareMin)
+        # ... keeping those with no other max/min inside them
+        innermost_pieces = [piece for piece in all_reduction_pieces
+                            if not piece.args[0].has(_ReduceOrCompareMax, _ReduceOrCompareMin)]
+        if not innermost_pieces:
+            break                                       # no max/min left: done
+
+        for piece in innermost_pieces:
+            # what is inside the brackets, e.g. Abs(x) for max(abs(x)), as a numpy function
+            inside_of_brackets = sp.lambdify(variables, piece.args[0], modules="numpy")
+            # its values on the full grid (broadcast: a constant like max(2) gives one number)
+            inside_values_on_grid = np.broadcast_to(
+                np.asarray(inside_of_brackets(grid_x, grid_y, grid_z), dtype=float),
+                np.asarray(grid_x).shape)
+            # the max (or min) over the whole grid: one number
+            number = float(numpy_reduction_of[type(piece)](inside_values_on_grid))
+            # put that number in the formula instead of the piece
+            formula = formula.subs(piece, number)
+
+    # 3) The formula has no max/min left: compile it once into a fast numpy function
+    compiled_formula = sp.lambdify(variables, formula, modules="numpy")
+
+    # 4) The function handed to CustomTPMSModel: points in -> field values out
+    def field_at_points(x, y, z):
+        values = compiled_formula(x, y, z)
+        # a formula without x, y or z (e.g. "0.5") gives one number: repeat it to the points' shape
+        return np.broadcast_to(np.asarray(values, dtype=float), np.asarray(x).shape)
+
+    return field_at_points
 
 
 # =====================================================================

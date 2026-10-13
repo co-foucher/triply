@@ -9,6 +9,7 @@ from .tpms_base import TPMSModel, create_a_tpms
 0 - (reserved)
 1 - IWPModel (class)
 2 - IWPModel._implicit_field
+2b - IWPModel._implicit_field_at
 3 - create_a_iwp
 #=====================================================================================================================
 
@@ -89,9 +90,42 @@ class IWPModel(TPMSModel):
         implicit_field : np.ndarray
             F(x, y, z), same shape as self.x.
         """
-        X = (2 * np.pi / self.px) * self.x
-        Y = (2 * np.pi / self.py) * self.y
-        Z = (2 * np.pi / self.pz) * self.z
+        return self._implicit_field_at(self.x, self.y, self.z)
+
+    # =====================================================================
+    # 2b) _implicit_field_at
+    # =====================================================================
+    def _implicit_field_at(self, x: np.ndarray, y: np.ndarray, z: np.ndarray) -> np.ndarray:
+        """
+        ============================================================================
+        2b) _IMPLICIT_FIELD_AT
+        Schoen I-WP implicit surface:
+            F = 2[cos(X)cos(Y) + cos(Y)cos(Z) + cos(Z)cos(X)]
+              - [cos(2X) + cos(2Y) + cos(2Z)]
+        Amplitude range: roughly [-5, +3].
+        px, py, pz are read with _value_at(): a function set with
+        set_point_function() if any, else self.px / self.py / self.pz.
+        ============================================================================
+
+        PARAMETERS
+        ----------
+        x, y, z : np.ndarray
+            Positions where F is evaluated, any shape (all three the same).
+
+        RETURNS
+        -------
+        implicit_field : np.ndarray
+            F(x, y, z), same shape as x.
+        """
+        # Periods at these points: from set_point_function() if one was set,
+        # else the stored self.px / self.py / self.pz (constant, or array on the grid)
+        px = self._value_at("px", self.px, x, y, z)
+        py = self._value_at("py", self.py, x, y, z)
+        pz = self._value_at("pz", self.pz, x, y, z)
+
+        X = (2 * np.pi / px) * x
+        Y = (2 * np.pi / py) * y
+        Z = (2 * np.pi / pz) * z
         return (
             2 * (np.cos(X) * np.cos(Y) + np.cos(Y) * np.cos(Z) + np.cos(Z) * np.cos(X))
             - (np.cos(2 * X) + np.cos(2 * Y) + np.cos(2 * Z))

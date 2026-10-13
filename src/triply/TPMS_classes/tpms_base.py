@@ -3,9 +3,8 @@ import numpy as np
 from typing import Optional, Tuple, Union
 
 # Use relative imports so this module works when used as a package
-from .. import io_ops, mesh_tools, viz
+from .. import io_ops, mesh_tools, viz, adaptive_meshing
 from ..logger import logger
-
 
 """
 #=====================================================================================================================
@@ -15,10 +14,15 @@ from ..logger import logger
 2b - v (deprecated alias for density_field)
 3 - TPMSModel._validate_inputs
 4 - TPMSModel._implicit_field
+4b - TPMSModel._implicit_field_at
+4c - TPMSModel.set_point_function
+4d - TPMSModel._value_at
 5 - TPMSModel.compute_field
+5b - TPMSModel.density_field_at
 6 - TPMSModel.save
 7 - TPMSModel.load
 8 - TPMSModel.generate_mesh
+8b - TPMSModel.generate_mesh_adaptive
 9 - TPMSModel.simplify_mesh
 10 - TPMSModel.export_stl
 11 - TPMSModel.save_mesh_preview
@@ -30,20 +34,113 @@ from ..logger import logger
 17 - create_a_tpms
 #=====================================================================================================================
 
-NOTE ON THIS MODULE
---------------------
-This holds everything that is common to every Triply Periodic Minimal
-Surface (TPMS) model (gyroid, Schwartz P, diamond, IWP, Neovius, ...):
-grid/parameter validation, the band/signed/signed_inverse/distance field
-pipeline, mesh generation/simplification/export, previews, and baseplates.
+HOW THE TPMS CLASSES WORK
+=========================
 
-A concrete TPMS type (see tpms_gyroid.py, tpms_schwartzp.py) is expected to
-be a small subclass that only:
-  1) overrides `_implicit_field()` with its implicit surface equation F(x,y,z),
-  2) optionally sets the `DEFAULT_FIELD_MODE` class attribute.
+1. WHAT A MODEL IS
+------------------
+A TPMSModel turns an equation into a printable mesh, in three stages:
+
+    implicit field F          density field              mesh
+    (the TPMS equation)  -->  (positive = solid,    -->  (verts, faces:
+    e.g. gyroid:               negative = empty)          the surface where
+    sin(X)cos(Y) + ...                                    density = 0)
+
+- The IMPLICIT FIELD F is the bare equation: F = 0 is the minimal surface.
+- The DENSITY FIELD decides what is solid, from F and the field mode:
+      "band"           : thickness - |F - level|    (a wall around F = level)
+      "signed"         : F - level                  (solid where F > level)
+      "signed_inverse" : level - F                  (solid where F < level)
+      "distance"       : like band, but the wall is thickness wide in real
+                         length units (needs the whole grid, see 3.)
+- The MESH is the surface density = 0, found by marching cubes.
+
+2. THE BASE CLASS AND THE SUBCLASSES
+------------------------------------
+TPMSModel (this file) holds everything common to all TPMS types: the field
+modes, meshing, simplification, export, previews, baseplates.
+
+A TPMS type (tpms_gyroid.py, tpms_schwartzp.py, ...) is a small subclass
+that only provides:
+  - _implicit_field_at(x, y, z) : F at ANY points (the equation itself)
+  - _implicit_field()           : F on the model's grid, a one-liner calling
+                                  _implicit_field_at(self.x, self.y, self.z)
+  - DEFAULT_FIELD_MODE          : the field mode used when none is given
 Everything else is inherited unchanged.
-"""
 
+CustomTPMSModel (tpms_custom.py) is the subclass for a field that is not one
+of the built-in equations: it receives F already computed on the grid
+(`field`), and optionally as a function of any points (`field_function`).
+
+3. HOW THE FIELD IS COMPUTED
+-----------------------------
+There are two entry points, one per meshing path (see 4.), and both end in
+the same equation:
+
+        on the whole grid                at any points
+        (regular meshing)                (adaptive meshing)
+        -----------------                ------------------
+        compute_field(mode, level)       density_field_at(x, y, z, mode, level)
+             |                                  |
+        _implicit_field()  ---calls--->  _implicit_field_at(x, y, z)
+                                                |
+                                         the TPMS equation F
+
+compute_field() stores F and the density field in the object of the model
+(self.implicit_field, self.density_field); density_field_at() stores
+nothing and only returns the values at the points it was given.
+
+4. TWO WAYS TO MESH
+-------------------
+REGULAR (uniform grid):
+    model.compute_field(mode, level)   F and the density field on the whole grid
+    model.generate_mesh()              marching cubes on that grid
+  Memory and time grow with the full grid, even far from the surface.
+
+ADAPTIVE (see adaptive_meshing.py):
+    model.generate_mesh_adaptive(number_of_subdivisions, mode, level, ...)
+  No compute_field(): the field is never computed on the full grid, which is
+  the whole point (it saves memory). The model's grid (x, y, z) is the COARSE
+  grid: only the cells near the surface are refined, number_of_subdivisions
+  times, so the final resolution is the grid spacing / 2**number_of_subdivisions.
+  The lattice is always closed at the faces of the box covered by the grid.
+  So it only works for modes and parameters that can be computed at any point:
+      - modes "band", "signed", "signed_inverse" (NOT "distance", which
+        needs the whole grid),
+      - parameters that are constants or functions (NOT arrays known only
+        on the grid, e.g. imported from a file).
+  The grid must be regular and built with np.meshgrid(..., indexing="ij").
+
+5. PARAMETERS: px, py, pz, thickness, level
+-------------------------------------------
+Each parameter can be defined in three ways:
+  - a CONSTANT                      (e.g. thickness = 0.6)
+  - an ARRAY on the grid            (e.g. imported from a file)
+  - a FUNCTION of position          set with set_point_function(name, f)
+The model never reads a parameter directly: it asks _value_at(name, ...)
+"what is it at these points?", which answers:
+  - a function was set           -> the function, evaluated at the points
+  - else a constant              -> the constant
+  - else an array on the grid    -> the array, only if the points ARE the
+                                    grid (otherwise its values are unknown)
+So both paths (grid and any points) always use the same definition.
+
+
+6. TYPICAL USE
+--------------
+    # REGULAR meshing: field and marching cubes on the whole grid
+    model = GyroidModel(x, y, z, px=10, py=10, pz=10, thickness=0.5)
+    model.compute_field(mode="band")
+    model.generate_mesh(iso_level=0)
+    model.export_stl("gyroid_regular.stl")
+
+    # ADAPTIVE meshing: x, y, z is the coarse grid, refined only near the surface
+    axis = np.linspace(0, 30, 15)                                   # coarse: 15 points per axis
+    x, y, z = np.meshgrid(axis, axis, axis, indexing="ij")
+    model = GyroidModel(x, y, z, px=10, py=10, pz=10, thickness=0.5)
+    model.generate_mesh_adaptive(number_of_subdivisions=3, mode="band")
+    model.export_stl("gyroid_adaptive.stl")
+"""
 
 # =====================================================================
 # 1) TPMSModel
@@ -137,6 +234,11 @@ class TPMSModel:
         self.py = py
         self.pz = pz
         self.thickness = thickness
+
+        # Optional functions to define a parameter at ANY points
+        # Keys: "px", "py", "pz", "thickness", "level". Set them with set_point_function().
+        # A parameter with a function is computed from it; without one, the stored value (above) is used.
+        self.point_functions = {}
 
         # --- optional data to the object ---
         self.implicit_field: Optional[np.ndarray] = None
@@ -235,6 +337,117 @@ class TPMSModel:
             f"{type(self).__name__} must implement _implicit_field()."
         )
 
+
+    # =====================================================================
+    # 4b) _implicit_field_at
+    # =====================================================================
+    def _implicit_field_at(self, x: np.ndarray, y: np.ndarray, z: np.ndarray) -> np.ndarray:
+        """
+        ============================================================================
+        4b) _IMPLICIT_FIELD_AT
+        Must be overridden by every concrete TPMS subclass that supports
+        adaptive meshing. Returns the implicit surface function F evaluated at
+        the given points (any shape), using the periods self.px/self.py/self.pz.
+        Same formula as _implicit_field(), which is F at self.x/self.y/self.z.
+        ============================================================================
+
+        PARAMETERS
+        ----------
+        x, y, z : np.ndarray
+            Positions where F is evaluated, any shape (all three the same).
+
+        RETURNS
+        -------
+        implicit_field : np.ndarray
+            F(x, y, z), same shape as x.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _implicit_field_at()."
+        )
+    
+    # =====================================================================
+    # 4c) set_point_function
+    # =====================================================================
+    def set_point_function(self, name: str, function) -> None:
+        """
+        ============================================================================
+        4c) SET_POINT_FUNCTION
+        Reads back what was set with set_point_function(): gives the value of a
+        parameter (px, py, pz, thickness or level) at the given points by
+        calling the function stored for it. If no function was set for that
+        parameter, it falls back to the stored value, so callers can always ask
+        "what is the thickness here?" without checking how it was defined.
+        ============================================================================
+
+        PARAMETERS
+        ----------
+        name : str
+            Which parameter: "px", "py", "pz", "thickness" or "level".
+        function : function
+            A Python function, passed WITHOUT parentheses, that takes three
+            numpy arrays x, y, z (same shape, any shape) holding positions in
+            the same units as the model's grid, and returns the parameter's
+            value there (numpy array of the same shape). Same rules as
+            CustomTPMSModel's field_function.
+
+        RETURNS
+        -------
+        None
+
+        EXAMPLE
+        -------
+        >>> def graded_thickness(x, y, z):
+        ...     return 0.3 + 0.05 * x          # thicker walls towards +x
+        >>> model.set_point_function("thickness", graded_thickness)
+        """
+        allowed_names = ("px", "py", "pz", "thickness", "level")
+        if name not in allowed_names:
+            raise ValueError(f"Unknown parameter {name!r}: must be one of {allowed_names}.")
+        self.point_functions[name] = function
+
+    # =====================================================================
+    # 4d) _value_at
+    # =====================================================================
+    def _value_at(self, name: str, value, x: np.ndarray, y: np.ndarray, z: np.ndarray):
+        """
+        ============================================================================
+        4d) _VALUE_AT
+        Value of a parameter at the given points:
+        1. its point function, if one was set with set_point_function();
+        2. otherwise the stored value, if it is a constant;
+        3. otherwise (an array known only on the grid, e.g. imported from a
+           file) the stored array, but only if the points ARE the grid.
+        ============================================================================
+
+        PARAMETERS
+        ----------
+        name : str
+            "px", "py", "pz", "thickness" or "level".
+        value : float or np.ndarray
+            The parameter as stored (self.px, self.thickness, ...; or the
+            level argument).
+        x, y, z : np.ndarray
+            Points, any shape (all three the same).
+
+        RETURNS
+        -------
+        value_at_points : float or np.ndarray
+            A constant, or an array of the same shape as x.
+        """
+        # if a function was given: compute the parameter at these points
+        point_function = self.point_functions.get(name)
+        if point_function is not None:
+            return point_function(x, y, z)
+
+        # or if a constant is the same everywhere
+        if np.isscalar(value):
+            return value
+
+        # or if an array on the grid: only valid at the grid points themselves
+        if np.shape(value) == np.shape(x):
+            return value
+        raise ValueError(f"{name} grid is not the same shape as x: {np.shape(value)} vs {np.shape(x)}. {name}")
+    
     # =====================================================================
     # 5) compute_field
     # =====================================================================
@@ -301,16 +514,22 @@ class TPMSModel:
         - physical_thickness: desired wall thickness in spatial units (only
           used for "distance" modes). May be a scalar or an ndarray with the
           same shape as x/y/z.
+        - thickness and level are read with _value_at(): a function set with
+          set_point_function("thickness" / "level", ...) takes priority over
+          self.thickness / the level argument.
         """
         if mode is None:
             mode = self.DEFAULT_FIELD_MODE
-
+        
+        # Get the periods at these points this method calls it, either  from a point function or from the stored values if the funcion is not defined.
+        thickness = self._value_at("thickness", self.thickness, self.x, self.y, self.z)
+        level = self._value_at("level", level, self.x, self.y, self.z)
         self.implicit_field = self._implicit_field()
 
         if mode == "band":
             # thickness interpreted in implicit_field-value units (supports scalar or per-voxel thickness)
             logger.info(f"Computing band field")
-            self.density_field = self.thickness - np.abs(self.implicit_field)
+            self.density_field = thickness - np.abs(self.implicit_field - level)
             return self.density_field
 
         if mode == "signed":
@@ -359,7 +578,7 @@ class TPMSModel:
             dist = dist_out + dist_in
 
             # actual distance to the surface need to be half the total distance
-            half_t = self.thickness / 2.0
+            half_t = thickness / 2.0
 
             #crate a mask of the voxel the are below the max distance
             mask = dist < half_t
@@ -371,6 +590,63 @@ class TPMSModel:
             return self.density_field
 
         raise ValueError("mode must be one of: 'band', 'signed', 'signed_inverse', 'distance', 'distance_fast'.")
+
+
+    # =====================================================================
+    # 5b) density_field_at
+    # =====================================================================
+    def density_field_at(self,
+                         x: np.ndarray,
+                         y: np.ndarray,
+                         z: np.ndarray,
+                         mode: Optional[str] = None,
+                         level: float = 0.0) -> np.ndarray:
+        """
+        ============================================================================
+        5b) DENSITY_FIELD_AT
+        Same density field as compute_field(), but evaluated at any given
+        points instead of on the model's grid. Only the modes that need
+        nothing but the point itself are available: "band", "signed" and
+        "signed_inverse". Nothing is stored on the model.
+        ============================================================================
+
+        PARAMETERS
+        ----------
+        x, y, z : np.ndarray
+            Positions where the field is evaluated, any shape (all three the same).
+        mode : str, optional
+            "band", "signed" or "signed_inverse" (see compute_field). None uses
+            this class's DEFAULT_FIELD_MODE, which must then be one of those three.
+        level : float, optional
+            Reference implicit_field value, as in compute_field (default 0.0).
+
+        RETURNS
+        -------
+        density_field : np.ndarray
+            Positive (solid) / negative (empty) field, same shape as x.
+        """
+        if mode is None:
+            mode = self.DEFAULT_FIELD_MODE
+
+        implicit_field = self._implicit_field_at(x, y, z)
+
+        # Thickness and level at these points: from set_point_function() if one was set,
+        # else the stored self.thickness / the level argument if it is a constant.
+        # An array known only on the grid (e.g. imported from a file) raises a clear error here.
+        thickness = self._value_at("thickness", self.thickness, x, y, z)
+        level = self._value_at("level", level, x, y, z)
+
+        # Same formulas as compute_field()
+        if mode == "band":
+            return thickness - np.abs(implicit_field - level)
+        if mode == "signed":
+            return implicit_field - level
+        if mode == "signed_inverse":
+            return level - implicit_field
+
+        raise ValueError(f"density_field_at supports 'band', 'signed' and 'signed_inverse'; "
+                         f"mode {mode!r} needs the whole grid.")
+
 
     # =====================================================================
     # 6) save
@@ -493,6 +769,73 @@ class TPMSModel:
         logger.info(f"Generated mesh with {len(self.faces)} faces")
         return self.verts, self.faces
 
+
+    # =====================================================================
+    # 8b) generate_mesh_adaptive
+    # =====================================================================
+    def generate_mesh_adaptive(self,
+                               number_of_subdivisions: int,
+                               mode: Optional[str] = "band",
+                               level: float = 0.0,
+                               baseplate_thickness: float = 0.0) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        ============================================================================
+        8b) GENERATE_MESH_ADAPTIVE
+        Generates the surface mesh with adaptive_meshing: the field is
+        evaluated on a coarse grid, and only the cells near the surface are
+        refined, number_of_subdivisions times, before marching cubes.
+        The box is the one covered by the model's grid (self.x, self.y, self.z).
+        ============================================================================
+
+        PARAMETERS
+        ----------
+        self : TPMSModel
+            The TPMS model instance containing the grid and parameters.
+        number_of_subdivisions : int
+            Final cell size = coarse cell size / 2**number_of_subdivisions.
+        mode : str, optional
+            "band", "signed" or "signed_inverse" (see density_field_at).
+        level : float, optional
+            Reference implicit_field value (default 0.0).
+        baseplate_thickness : float, optional
+            Thickness of the solid plates at both z ends of the box, same units
+            as self.z. 0 = no plates (default). Exact thickness, not rounded to
+            whole grid slices like add_baseplates().
+
+        RETURNS
+        -------
+        verts, faces : (np.ndarray, np.ndarray)
+            The generated vertices and faces (also stored on self).
+        """
+        # The box covered by the model's grid, from its first to its last point along each axis
+        origin = np.array([self.x.min(), self.y.min(), self.z.min()])
+        box_size = np.array([self.x.max(), self.y.max(), self.z.max()]) - origin
+
+        # ---- 1) create the field function for adaptive_meshing.create_cells() ----
+        def field_function(x, y, z):
+            # refine_cells works in a box starting at 0: shift to the model's real positions
+            values = self.density_field_at(x, y, z, mode, level)
+            if baseplate_thickness > 0:
+                # plate: positive (solid) closer than baseplate_thickness to the bottom or top of the box
+                distance_to_nearest_end = np.minimum(z - origin[2], box_size[2] + origin[2] - z)
+                plate = baseplate_thickness - distance_to_nearest_end
+                values = np.maximum(values, plate)          # union: solid if lattice OR plate
+            return values
+
+        # ---- 2) create the cells and run the adaptive res algorithm ----
+        Cells = adaptive_meshing.create_cells(x=self.x,
+                                                y=self.y,
+                                                z=self.z,
+                                                field_function=field_function)
+        Cells = adaptive_meshing.refine_cells(cells=Cells, 
+                                              number_of_subdivisions=number_of_subdivisions)
+
+        # ---- 3) mesh the resulting adaptive cells ----
+        self.verts, self.faces = adaptive_meshing.mesh_cells(cells=Cells)
+
+        logger.info(f"Generated adaptive mesh with {len(self.faces)} faces")
+        return self.verts, self.faces
+    
     # =====================================================================
     # 9) simplify_mesh
     # =====================================================================
@@ -715,7 +1058,11 @@ class TPMSModel:
     # =====================================================================
     # 16) smooth_mesh
     # =====================================================================
-    def smooth_mesh(self, smoothing_factor: float = 0.5):
+    def smooth_mesh(self, 
+                    smoothing_factor: float = 0.5, 
+                    manual: bool = False,
+                    manual_iterations: int = 10,
+                    max_iterations: int = 100):
         """
         ============================================================================
         16) SMOOTH_MESH
@@ -735,10 +1082,16 @@ class TPMSModel:
             raise RuntimeError("Mesh has not been generated yet.")
 
         #self.verts, self.faces = mesh_tools.smooth_mesh(self.verts, self.faces, smoothing_factor=smoothing_factor)
-
-        self.verts, self.faces = mesh_tools.auto_smooth_mesh(verts = self.verts, 
-                                                             faces = self.faces,
-                                                             smoothing_factor = smoothing_factor)
+        if manual:
+            self.verts, self.faces = mesh_tools.smooth_mesh(verts = self.verts, 
+                                                            faces = self.faces, 
+                                                            smoothing_factor = smoothing_factor, 
+                                                            iterations = manual_iterations)
+        else:
+            self.verts, self.faces = mesh_tools.auto_smooth_mesh(verts = self.verts, 
+                                                                faces = self.faces,
+                                                                smoothing_factor = smoothing_factor,
+                                                                max_iterations = max_iterations)
 
 # =====================================================================
 # 17) create_a_tpms

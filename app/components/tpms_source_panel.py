@@ -1,11 +1,13 @@
 
-from typing import Optional, Union
+from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
+import plotly.graph_objects as go
 import streamlit as st
 
+from triply.mesh_tools import _taubin_coefficients_from_strength
 from triply.TPMS_classes.tpms_custom import CustomTPMSModel
-from app.components.equation_input import evaluate_custom_inputs, EquationError
+from app.components.equation_input import evaluate_custom_inputs, EquationError, make_field_function
 from app.components.file_picker import browse_file
 from app.components.import_TPMS_files import import_matrix_from_file
 from app.components.equation_input import render_equation_input
@@ -22,7 +24,12 @@ FIELD_HELPS = {
     "Distance": "The density field is computed as the distance (defined by the thickness) to an iso-surface (defined by the threshold).",
     "Signed": "The density field is computed by implicit_field > threshold.",
     "Signed (inverted)": "The density field is computed by implicit_field < threshold.",
-    "Band": "The density field is computed as density_field = (thickness - np.abs(implicit_field)) > threshold. This is a fast approximation of the distance field",
+    "Band": (
+        "Sheet around the iso-surface implicit_field = threshold. Density field is camputed as "
+        "density_field = thickness - |implicit_field - threshold|, "
+        "Thickness is in implicit-field units, not physical units."
+        "Faster than Distance, but only an approximation of a constant-thickness wall."
+    ),
 }
 
 # Reverse of FIELD_MODES ("distance" -> "Distance"), for turning the internal
@@ -45,9 +52,13 @@ SHEET_MODES = ("band", "distance")
 3 - load_STL
 4 - render_threshold
 5 - render_thickness
+6a - find_unsupported_adaptive_inputs
 6 - generate_ui_tpms
 7 - pad_to_square
 8 - render_period_input
+11 - _compute_kept_fraction
+12 - _build_smoothing_figure
+13 - render_smoothing_preview
 #=====================================================================================================================
 """
 
@@ -177,42 +188,39 @@ def render_threshold(field_mode: str, params) -> np.ndarray:
     threshold : float
         The level/threshold value.
     """
-    if field_mode == "band":
-            return 0.0  # Band ignores level/threshold entirely - no widget
-    else:
-        threshold_field_source = st.segmented_control( "Threshold", ["Constant", "Custom equation", "Import from file"], default="Constant", key="tpms_threshold_source",)
-        if threshold_field_source == "Constant":
-            value = st.number_input(
-                "Field threshold",
-                value=0.0, key="tpms_threshold", label_visibility="collapsed")
-            return value
-        elif threshold_field_source == "Custom equation":
-            custom_threshold_equation = render_equation_input(label="Custom threshold", 
-                                                            default_equation = "0.3 + 0.8 * x / max(abs(x))", 
-                                                            key_prefix="tpms_threshold_eq",
-                                                            size_x=params.size_x,
-                                                            size_y=params.size_y,
-                                                            size_z=params.size_z,
-                                                            origin_x=params.origin_x, origin_y=params.origin_y, origin_z=params.origin_z)
-            if custom_threshold_equation is None:
-                st.error("Please enter a valid custom threshold equation.")
-                return np.full_like(params.u, 0.0)
-            else:
-                custom_threshold = evaluate_custom_inputs(custom_threshold_equation, params.u, params.v, params.w)
-                return np.array(custom_threshold)
-        elif threshold_field_source == "Import from file":
-            browse_file(
-                    key="tpms_threshold_matrix_path",
-                    title=f"Select a threshold matrix file",
-                    filetypes=[("Numpy files", "*.npy"), ("All files", "*.*")],
-                )
-            # import the matrix from file
-            threshold_matrix = import_matrix_from_file(
-                file_path=st.session_state["tpms_threshold_matrix_path"])
-            if threshold_matrix is not None:
-                if threshold_matrix.shape != (params.resolution,) * 3:
-                        threshold_matrix = _adapt_resolution(threshold_matrix, params)
-                return threshold_matrix
+    threshold_field_source = st.segmented_control( "Threshold", ["Constant", "Custom equation", "Import from file"], default="Constant", key="tpms_threshold_source",)
+    if threshold_field_source == "Constant":
+        value = st.number_input(
+            "Field threshold",
+            value=0.0, key="tpms_threshold", label_visibility="collapsed")
+        return value
+    elif threshold_field_source == "Custom equation":
+        custom_threshold_equation = render_equation_input(label="Custom threshold", 
+                                                        default_equation = "0.3 + 0.8 * x / max(abs(x))", 
+                                                        key_prefix="tpms_threshold_eq",
+                                                        size_x=params.size_x,
+                                                        size_y=params.size_y,
+                                                        size_z=params.size_z,
+                                                        origin_x=params.origin_x, origin_y=params.origin_y, origin_z=params.origin_z)
+        if custom_threshold_equation is None:
+            st.error("Please enter a valid custom threshold equation.")
+            return np.full_like(params.u, 0.0)
+        else:
+            custom_threshold = evaluate_custom_inputs(custom_threshold_equation, params.u, params.v, params.w)
+            return np.array(custom_threshold)
+    elif threshold_field_source == "Import from file":
+        browse_file(
+                key="tpms_threshold_matrix_path",
+                title=f"Select a threshold matrix file",
+                filetypes=[("Numpy files", "*.npy"), ("All files", "*.*")],
+            )
+        # import the matrix from file
+        threshold_matrix = import_matrix_from_file(
+            file_path=st.session_state["tpms_threshold_matrix_path"])
+        if threshold_matrix is not None:
+            if threshold_matrix.shape != (params.resolution,) * 3:
+                    threshold_matrix = _adapt_resolution(threshold_matrix, params)
+            return threshold_matrix
 
     return 0.0
             
@@ -283,6 +291,66 @@ def render_thickness(
 
 
 # =====================================================================
+# 6a) find_unsupported_adaptive_inputs
+# =====================================================================
+def find_unsupported_adaptive_inputs(params) -> list:
+    """
+    ============================================================================
+    6a) FIND_UNSUPPORTED_ADAPTIVE_INPUTS
+    Lists the current inputs that adaptive resolution cannot use. Adaptive
+    meshing evaluates the field at ANY point (the corners of the refined
+    cells), so every input must be a constant or a function of position:
+    anything known only on the grid (an array) cannot be used.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    params : TPMSParams
+        The generation settings bundle from 1_Generate_TPMS.py.
+
+    RETURNS
+    -------
+    reasons : list of str
+        One sentence per unsupported input. Empty list: adaptive resolution
+        can run with these inputs.
+    """
+    reasons = []
+
+    # "distance" needs a distance transform over the whole grid
+    if params.field_mode == "distance":
+        reasons.append("The Distance field mode needs the whole grid: choose Band, Signed or Signed (inverted).")
+
+    # in Cylindrical / Spherical mode the field is computed in (u, v, w) on the grid, then kept only as an array
+    if params.grid_mode != "Cartesian":
+        reasons.append(f"The {params.grid_mode} grid mode is only available with the regular grid: choose Cartesian.")
+
+    # an imported implicit field exists only on the grid
+    if params.implicit_field_source == "Import from file":
+        reasons.append("An implicit field imported from a file is only known on the grid: "
+                       "use a Built-in type or a Custom equation.")
+
+    # periods: a constant, or a Custom equation (kept as a function) are fine; an imported matrix is not
+    if params.implicit_field_source == "Built-in type":
+        for axis, period, period_function in (("X", params.px, params.px_function),
+                                              ("Y", params.py, params.py_function),
+                                              ("Z", params.pz, params.pz_function)):
+            if np.ndim(period) != 0 and period_function is None:
+                reasons.append(f"Period {axis} imported from a file is only known on the grid: use Constant or Custom.")
+
+    # threshold and thickness are given to the model as arrays when they come from an equation or a file
+    if np.ndim(params.threshold) != 0:
+        reasons.append("A threshold from a custom equation or a file is only known on the grid: use Constant.")
+    if np.ndim(params.thickness) != 0:
+        reasons.append("A thickness from a custom equation or a file is only known on the grid: use Constant.")
+
+    # the geometry combination edits the density field on the grid, which adaptive meshing never reads
+    if params.geometry is not None:
+        reasons.append("Combining with an existing geometry works on the grid only: untick it.")
+
+    return reasons
+
+
+# =====================================================================
 # 6) generate_ui_tpms
 # =====================================================================
 def generate_ui_tpms(
@@ -322,6 +390,9 @@ def generate_ui_tpms(
     -----
     - EquationError raised by evaluate_custom_inputs() is caught internally
       and shown as a Streamlit error message rather than propagating.
+    - With adaptive resolution on, inputs it cannot use (see
+      find_unsupported_adaptive_inputs) stop the run before any computation,
+      with an error message listing them.
     """
     #x, y, z = params.x, params.y, params.z   # physical Cartesian grid, used for meshing
     # coordinates the equation is evaluated in (= x, y, z in Cartesian mode)
@@ -331,12 +402,25 @@ def generate_ui_tpms(
     # are different from x,y,z in the case where we use cylindrical or spherical coordinate sytem.
     #params.u, params.v, params.w = conformal_coords(x, y, z, grid_mode, periods)
 
+    # ----- gate: stop before any computation if adaptive resolution cannot use these inputs ------
+    if params.adaptive_resolution:
+        reasons = find_unsupported_adaptive_inputs(params)
+        if reasons:
+            st.error("Adaptive resolution cannot run with these inputs:\n"
+                     + "\n".join(f"- {reason}" for reason in reasons)
+                     + "\n\nChange them, or turn Adaptive resolution off.")
+            return
+
     try:
         with st.spinner("Computing field and generating mesh..."):
             # ----- Built-in type ------
             if params.implicit_field_source == "Built-in type":
                 if params.grid_mode == "Cartesian":
                     model = BUILTIN_TYPES[params.type_name](params.x, params.y, params.z, params.px, params.py, params.pz, params.thickness)
+                    # custom periods: keep their functions, so the model can evaluate them at any point (adaptive meshing)
+                    for name, period_function in (("px", params.px_function), ("py", params.py_function), ("pz", params.pz_function)):
+                        if period_function is not None:
+                            model.set_point_function(name, period_function)
                 else:
                     # evaluate the TPMS equation in (u, v, w), then hand the field to a
                     # model living on the Cartesian grid (meshing needs a regular box)
@@ -345,9 +429,11 @@ def generate_ui_tpms(
 
             # ----- Custom equation ------
             elif params.implicit_field_source == "Custom equation":
-                # in the equation, x, y, z stand for u, v, w (see conformal_coords)
                 params.field = evaluate_custom_inputs(params.custom_equation, params.u, params.v, params.w)
-                model = CustomTPMSModel(params.x, params.y, params.z, params.thickness, field=params.field)
+                # same equation, at any points (used by adaptive meshing)
+                custom_field_function = make_field_function(params.custom_equation, params.u, params.v, params.w)
+                model = CustomTPMSModel(params.x, params.y, params.z, params.thickness,
+                                        field=params.field, field_function=custom_field_function)
 
             # ----- Import from file ------
             elif params.implicit_field_source == "Import from file":
@@ -382,11 +468,23 @@ def generate_ui_tpms(
 
             # ----- generate mesh ------
             st.session_state["current_field_range"] = (float(model.implicit_field.min()), float(model.implicit_field.max()))
-            model.generate_mesh(iso_level=0)
+            # adaptive resolution meshing
+            if params.adaptive_resolution:
+                model.generate_mesh_adaptive(
+                    number_of_subdivisions=params.number_of_subdivisions,
+                    mode=params.field_mode, level=params.threshold,
+                    baseplate_thickness=params.baseplate_thickness)
+            else:
+                model.generate_mesh(iso_level=0)
+            # smoothing
             if params.auto_smooth:
                 model.smooth_mesh(smoothing_factor=params.smoothing_factor)
+            else:
+                model.smooth_mesh(smoothing_factor=params.smoothing_factor, manual=True, manual_iterations=params.number_of_smoothing_passes)
+            # simplification
             target_faces = params.max_faces_count if params.max_faces else params.simplification_factor
-            model.simplify_mesh(target_faces=target_faces)
+            if params.max_faces or params.simplification_factor != 1.0:
+                model.simplify_mesh(target_faces=target_faces)
             model.fix_mesh()
             is_valid = model.check_mesh_quality()
 
@@ -442,7 +540,7 @@ def render_period_input(
     params,
     default: float = 5.0,
     disable_complex_options: bool = False,
-) -> Optional[Union[float, np.ndarray]]:
+) -> Tuple[Optional[Union[float, np.ndarray]], Optional[Callable]]:
     """
     ============================================================================
     8) RENDER_PERIOD_INPUT
@@ -467,6 +565,12 @@ def render_period_input(
     RETURNS
     -------
     period : float, np.ndarray, or None
+        The period on the grid.
+    period_function : callable or None
+        For the "Custom" source only: the same equation as a function of ANY
+        points, period_function(x, y, z), given to the model with
+        set_point_function() so that adaptive meshing can evaluate it.
+        None for the other sources.
     """
     # ------ select source: constant vs imported matrix -----
     if not disable_complex_options:
@@ -486,7 +590,7 @@ def render_period_input(
         return st.number_input(
             f"Period {axis}", value=default, min_value=0.01,
             key=f"tpms_p{axis.lower()}",label_visibility="collapsed",
-        )
+        ), None
 
     # ------ if source == custom ------
     if source == "Custom":
@@ -499,12 +603,16 @@ def render_period_input(
         )
         if custom_period_equation is None:
             st.error(f"Please enter a valid custom Period {axis} equation.")
-            return 5.0
+            return 5.0, None
         else:
             custom_period = evaluate_custom_inputs(
                 custom_period_equation, params.u, params.v, params.w
             )
-            return np.array(custom_period)
+            # the same equation as a function of ANY points (needed by adaptive meshing)
+            custom_period_function = make_field_function(
+                custom_period_equation, params.u, params.v, params.w
+            )
+            return np.array(custom_period), custom_period_function
 
     # ------ if source == import ------
     # Render the "Browse..." button and 
@@ -521,13 +629,13 @@ def render_period_input(
     # validate the imported matrix
     if period_matrix is None:
         st.error(f"Please select a valid {axis.upper()}-period matrix file.")
-        return None  # import failed / no file picked yet - already reported
+        return None, None  # import failed / no file picked yet - already reported
     elif period_matrix.ndim != 3:
         st.error(f"Please select a valid 3D array for Period {axis}.")
-        return None
+        return None, None
     elif period_matrix.shape != (params.resolution,) * 3:
         period_matrix = _adapt_resolution(period_matrix, params)
-    return period_matrix
+    return period_matrix, None
 
 # =====================================================================
 # 9) make_grid
@@ -723,3 +831,169 @@ def documentation_cyl_and_sphere_systems(mode: str):
         "such that an integer number of cells fits around the azimuthal angle.")
     else: 
         st.error(f"Unknown mode: {mode}. Please choose either 'Cylindrical' or 'Spherical'.")
+
+# =====================================================================
+# Smoothing preview: live chart under the "Smoothing factor" slider
+# =====================================================================
+# Live chart under the "Smoothing factor" slider of 1_Generate_TPMS.py: shows,
+# for the current slider value, how much of a surface ripple of a given width
+# survives the Taubin smoothing - so the user sees which feature sizes get
+# erased and which are kept, instead of guessing what "0.37" means.
+#
+# The curve uses the SAME (lambda, mu) as the real smoothing, through
+# triply.mesh_tools._taubin_coefficients_from_strength, so the chart cannot
+# drift away from what mesh_tools.smooth_mesh actually does.
+#
+# Theory:
+#     a ripple that repeats every `width` edges has frequency
+#         k = 1 - cos(2*pi / width)
+#     and one Taubin pass multiplies its height by
+#         f(k) = (1 - lambda*k) * (1 - mu*k)
+#     so after N passes, the fraction kept is f(k)**N.
+# Assumption: the mesh is modelled locally as a regular chain of vertices with
+# equal weights, and one edge ~ one voxel (true right after marching cubes).
+# The numbers are therefore a guide, not an exact prediction for a real mesh.
+
+# Must match the values hard-coded in mesh_tools.smooth_mesh().
+_PASSBAND_FREQUENCY = 0.1
+_MAXIMUM_FREQUENCY = 2.0
+
+# Ripple width (in voxels) whose frequency equals the passband frequency:
+# solve 1 - cos(2*pi / width) = passband  ->  width = 2*pi / arccos(1 - passband)
+# (= 13.9 voxels for passband = 0.1). Wider ripples are kept unchanged.
+_PASSBAND_WIDTH = 2.0 * np.pi / np.arccos(1.0 - _PASSBAND_FREQUENCY)
+
+
+
+
+# =====================================================================
+# 11) _compute_kept_fraction
+# =====================================================================
+def _compute_kept_fraction(ripple_width: np.ndarray,
+                           smoothing_factor: float,
+                           number_of_passes: int) -> np.ndarray:
+    """
+    ============================================================================
+    11) _COMPUTE_KEPT_FRACTION
+    Fraction of a ripple's height that survives `number_of_passes` Taubin
+    passes, for each ripple width (in voxels / edges).
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    ripple_width : ndarray
+        Ripple wavelengths in edges (>= 2: a 2-edge zig-zag is the finest
+        pattern a mesh can carry).
+    smoothing_factor : float
+        Slider value in [0, 1], mapped to (lambda, mu) exactly as in
+        mesh_tools.smooth_mesh().
+    number_of_passes : int
+        Number of Taubin iterations.
+
+    RETURNS
+    -------
+    kept_fraction : ndarray
+        f(k)**number_of_passes for each width (1 = untouched, 0 = erased).
+    """
+    lambda_factor, mu_factor = _taubin_coefficients_from_strength(
+        strength=smoothing_factor,
+        passband_frequency=_PASSBAND_FREQUENCY,
+        maximum_frequency=_MAXIMUM_FREQUENCY)
+
+    # frequency of a ripple repeating every `ripple_width` edges (chain model)
+    frequency = 1.0 - np.cos(2.0 * np.pi / ripple_width)
+    # per-pass gain of that ripple
+    gain_per_pass = (1.0 - lambda_factor * frequency) * (1.0 - mu_factor * frequency)
+    return gain_per_pass ** number_of_passes
+
+
+# =====================================================================
+# 12) _build_smoothing_figure
+# =====================================================================
+@st.cache_data(show_spinner=False, max_entries=32)
+def _build_smoothing_figure(smoothing_factor: float, number_of_passes: int) -> go.Figure:
+    """
+    ============================================================================
+    12) _BUILD_SMOOTHING_FIGURE
+    Pure, cacheable half of render_smoothing_preview: builds the
+    "% of the feature kept vs feature width" figure. No st.* widget calls in
+    here (only the figure is memoized).
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    smoothing_factor : float
+        Slider value in [0, 1].
+    number_of_passes : int
+        Number of Taubin passes for the "after N passes" curve.
+
+    RETURNS
+    -------
+    figure : plotly.graph_objects.Figure
+    """
+    # log-spaced widths: the interesting range is 2-10 voxels, but we want to
+    # show that wide features (> ~14 voxels) are left alone
+    ripple_width = np.geomspace(2.0, 40.0, 300)
+    kept_after_one_pass = 100.0 * _compute_kept_fraction(ripple_width, smoothing_factor, 1)
+    kept_after_all_passes = 100.0 * _compute_kept_fraction(ripple_width, smoothing_factor, number_of_passes)
+
+    figure = go.Figure()
+    figure.add_trace(go.Scatter(
+        x=ripple_width, y=kept_after_all_passes, mode="lines", name=f"after {number_of_passes} passes",
+        line=dict(width=3),
+        hovertemplate="feature width %{x:.1f} voxels<br>%{y:.0f} % kept<extra></extra>"))
+    figure.add_trace(go.Scatter(
+        x=ripple_width, y=kept_after_one_pass, mode="lines", name="after 1 pass",
+        line=dict(width=1.5, dash="dot"),
+        hovertemplate="feature width %{x:.1f} voxels<br>%{y:.0f} % kept<extra></extra>"))
+
+    # mark the width above which features are preserved (passband)
+    figure.add_vline(x=_PASSBAND_WIDTH, line_dash="dash", line_color="gray")
+    # label added separately: on a log axis, annotation x is given in log10 units,
+    # which add_vline(annotation_text=...) does not convert (label ends up off-plot)
+    figure.add_annotation(x=np.log10(_PASSBAND_WIDTH), y=0.05, xref="x", yref="paper",
+                          text=f"wider than ~{_PASSBAND_WIDTH:.0f} voxels: kept",
+                          showarrow=False, xanchor="left", xshift=6)
+
+    figure.update_layout(
+        height=260,
+        margin=dict(l=60, r=10, t=30, b=50),  # room for the axis titles
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0.0),
+        # explicit range, in log10 units for a log axis: add_vline() otherwise breaks
+        # Plotly's autorange on log axes and squeezes the curves to the left
+        xaxis=dict(title="feature width (voxels)", type="log",
+                   range=[np.log10(ripple_width[0]), np.log10(ripple_width[-1])],
+                   tickvals=[2, 3, 4, 6, 8, 10, 14, 20, 30, 40]),
+        yaxis=dict(title="% of the feature kept", range=[0, 105]),
+    )
+    return figure
+
+
+# =====================================================================
+# 13) render_smoothing_preview
+# =====================================================================
+def render_smoothing_preview(smoothing_factor: float,
+                             number_of_passes: int = 10,
+                             key: str = "tpms_smoothing_preview") -> None:
+    """
+    ============================================================================
+    13) RENDER_SMOOTHING_PREVIEW
+    Thin, uncached UI wrapper: draws the chart for the current slider value.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    smoothing_factor : float
+        Current value of the "Smoothing factor" slider, in [0, 1].
+    number_of_passes : int, optional
+        Number of passes for the main curve (default = 10). NOTE: with
+        auto-smooth, the real number of passes is chosen by
+        mesh_tools.auto_smooth_mesh, so this curve is indicative.
+    key : str, optional
+        Streamlit element key. Ends with "_preview" so page_state's
+        mirror_widget_state() does not save it as user input.
+    """
+    figure = _build_smoothing_figure(float(smoothing_factor), int(number_of_passes))
+    st.plotly_chart(figure, width="stretch", key=key)
+    st.caption("How much of a surface feature of each width survives the smoothing. "
+               "Small bumps (left) are removed; walls and pores (right) are kept.")

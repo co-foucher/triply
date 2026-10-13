@@ -9,6 +9,7 @@ from .tpms_base import TPMSModel, create_a_tpms
 0 - (reserved)
 1 - GyroidModel (class)
 2 - GyroidModel._implicit_field
+2b - GyroidModel._implicit_field_at
 3 - create_a_gyroid
 #=====================================================================================================================
 
@@ -81,12 +82,42 @@ class GyroidModel(TPMSModel):
         implicit_field : np.ndarray
             F(x, y, z), same shape as self.x.
         """
-        return (
-            np.sin((2 * np.pi / self.px) * self.x) * np.cos((2 * np.pi / self.py) * self.y)
-            + np.sin((2 * np.pi / self.py) * self.y) * np.cos((2 * np.pi / self.pz) * self.z)
-            + np.sin((2 * np.pi / self.pz) * self.z) * np.cos((2 * np.pi / self.px) * self.x)
-        )
+        return self._implicit_field_at(self.x, self.y, self.z)
+    
+    # =====================================================================
+    # 2b) _implicit_field_at
+    # =====================================================================
+    def _implicit_field_at(self, x: np.ndarray, y: np.ndarray, z: np.ndarray) -> np.ndarray:
+        """
+        ============================================================================
+        2b) _IMPLICIT_FIELD_AT
+        Gyroid implicit surface, evaluated at the given points:
+            F = sin(2π/px·x)·cos(2π/py·y) + sin(2π/py·y)·cos(2π/pz·z)
+              + sin(2π/pz·z)·cos(2π/px·x)
+        px, py, pz are read with _value_at(): a function set with
+        set_point_function() if any, else self.px / self.py / self.pz.
+        ============================================================================
 
+        PARAMETERS
+        ----------
+        x, y, z : np.ndarray
+            Positions where F is evaluated, any shape (all three the same).
+
+        RETURNS
+        -------
+        implicit_field : np.ndarray
+            F(x, y, z), same shape as x.
+        """
+        # Get the periods at these points this method calls it, either  from a point function or from the stored values if the funcion is not defined.
+        px = self._value_at("px", self.px, x, y, z)
+        py = self._value_at("py", self.py, x, y, z)
+        pz = self._value_at("pz", self.pz, x, y, z)
+
+        return (
+            np.sin((2 * np.pi / px) * x) * np.cos((2 * np.pi / py) * y)
+            + np.sin((2 * np.pi / py) * y) * np.cos((2 * np.pi / pz) * z)
+            + np.sin((2 * np.pi / pz) * z) * np.cos((2 * np.pi / px) * x)
+        )
 
 # =====================================================================
 # 3) create_a_gyroid

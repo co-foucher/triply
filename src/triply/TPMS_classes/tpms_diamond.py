@@ -9,6 +9,7 @@ from .tpms_base import TPMSModel, create_a_tpms
 0 - (reserved)
 1 - DiamondModel (class)
 2 - DiamondModel._implicit_field
+2b - DiamondModel._implicit_field_at
 3 - create_a_diamond
 #=====================================================================================================================
 
@@ -87,9 +88,42 @@ class DiamondModel(TPMSModel):
         implicit_field : np.ndarray
             F(x, y, z), same shape as self.x.
         """
-        X = (2 * np.pi / self.px) * self.x
-        Y = (2 * np.pi / self.py) * self.y
-        Z = (2 * np.pi / self.pz) * self.z
+        return self._implicit_field_at(self.x, self.y, self.z)
+
+    # =====================================================================
+    # 2b) _implicit_field_at
+    # =====================================================================
+    def _implicit_field_at(self, x: np.ndarray, y: np.ndarray, z: np.ndarray) -> np.ndarray:
+        """
+        ============================================================================
+        2b) _IMPLICIT_FIELD_AT
+        Schwarz Diamond implicit surface:
+            F = sin(X)sin(Y)sin(Z) + sin(X)cos(Y)cos(Z)
+              + cos(X)sin(Y)cos(Z) + cos(X)cos(Y)sin(Z)
+        Amplitude range: roughly [-√2, +√2].
+        px, py, pz are read with _value_at(): a function set with
+        set_point_function() if any, else self.px / self.py / self.pz.
+        ============================================================================
+
+        PARAMETERS
+        ----------
+        x, y, z : np.ndarray
+            Positions where F is evaluated, any shape (all three the same).
+
+        RETURNS
+        -------
+        implicit_field : np.ndarray
+            F(x, y, z), same shape as x.
+        """
+        # Periods at these points: from set_point_function() if one was set,
+        # else the stored self.px / self.py / self.pz (constant, or array on the grid)
+        px = self._value_at("px", self.px, x, y, z)
+        py = self._value_at("py", self.py, x, y, z)
+        pz = self._value_at("pz", self.pz, x, y, z)
+
+        X = (2 * np.pi / px) * x
+        Y = (2 * np.pi / py) * y
+        Z = (2 * np.pi / pz) * z
         return (
             np.sin(X) * np.sin(Y) * np.sin(Z)
             + np.sin(X) * np.cos(Y) * np.cos(Z)

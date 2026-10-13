@@ -8,45 +8,9 @@ from .tpms_base import TPMSModel, create_a_tpms
 0 - (reserved)
 1 - CustomTPMSModel (class)
 2 - CustomTPMSModel._implicit_field
+2b - CustomTPMSModel._implicit_field_at
 3 - create_a_custom_tpms
 #=====================================================================================================================
-
-NOTE ON THIS MODULE
---------------------
-This generalizes tpms_gyroid.py / tpms_schwartzp.py / etc.: instead of a
-hardcoded `_implicit_field()`, CustomTPMSModel returns a *precomputed*
-implicit-surface field array supplied at construction time. Everything
-else - field-mode processing, meshing, simplification, export, previews -
-is inherited unchanged from TPMSModel, exactly like the built-in types.
-
-This class has no notion of equation strings, sympy, or parsing of any
-kind - it only ever deals with plain numpy arrays, same as every other
-TPMSModel subclass. Turning a user-typed formula (e.g. from the GUI's
-"Generate TPMS" page) into a numeric array is entirely the caller's
-responsibility; see app/components/equation_input.py (parsing,
-validation, the widget, and the evaluation call site all live there) for
-the app-side implementation that produces the `field`/`thickness` arrays
-this class expects. That separation is deliberate: the library stays a
-plain numerical-computation package, and anything GUI-specific lives in
-the application layer instead.
-
-NOTE on px/py/pz: unlike the built-in types (GyroidModel etc.), where
-px/py/pz are the periods plugged into a fixed, hardcoded equation, here
-the field is already fully defined by the `field` array the caller
-supplies - there's nothing left for a separate period to parameterize.
-So CustomTPMSModel itself simply doesn't take px/py/pz at all - __init__
-passes fixed placeholder values (1.0) to TPMSModel.__init__ on the
-caller's behalf, since that base constructor still requires them
-positionally (it stores/saves them like every other parameter).
-
-create_a_custom_tpms() below still delegates to the shared
-tpms_base.create_a_tpms() pipeline, same as create_a_gyroid() etc. - that
-helper calls every model type uniformly as
-model_cls(x, y, z, px, py, pz, thickness). To bridge that uniform
-convention to CustomTPMSModel's px/py/pz-less constructor, it passes a
-small wrapper as model_cls that accepts (and discards) px/py/pz, and
-always drives px=py=pz=1.0 into create_a_tpms() itself - matching
-CustomTPMSModel's own placeholder values above.
 """
 
 
@@ -73,6 +37,28 @@ class CustomTPMSModel(TPMSModel):
     field : np.ndarray
         Precomputed implicit surface values F(x, y, z), same shape as x.
         Returned as-is by _implicit_field().
+    field_function : callable, optional
+        The formula of F, given as a Python function, so that F can be
+        computed at any point (needed only by generate_mesh_adaptive).
+        example: `  def my_surface(x, y, z):
+                        return np.sin(x) * np.cos(y) + np.sin(y) * np.cos(z) + np.sin(z) * np.cos(x)
+
+                    model = CustomTPMSModel(x, y, z, thickness,
+                                            field=my_surface(x, y, z),     # values on the grid
+                                            field_function=my_surface)     # the formula itself
+                 `
+        RULES FOR THAT FUNCTION
+        - Input: three numpy arrays x, y, z (same shape, ANY shape) holding
+          positions in the same units as the model's grid.
+        - Output: one numpy array of the same shape, the value of F there.
+        - Use numpy functions (np.sin, np.cos, ...), not the math module and
+          not a loop over points: it receives many points at once.
+        - It must give the same surface as `field`
+          (my_surface(x, y, z) == field on the grid). Nothing checks this.
+        - It must give finite numbers everywhere in the box: no log or sqrt
+          of negative values (NaN leaves holes in the mesh).
+        - Return F itself, not the density field: the field mode ("band",
+          "signed", ...) is applied afterwards, as for `field`.
 
     RAISES
     ------
@@ -94,7 +80,7 @@ class CustomTPMSModel(TPMSModel):
 
     DEFAULT_FIELD_MODE = "distance"
 
-    def __init__(self, x, y, z, thickness, field: np.ndarray):
+    def __init__(self, x, y, z, thickness, field: np.ndarray, field_function=None):
         field = np.asarray(field, dtype=float)
         x_shape = np.asarray(x).shape
         if field.shape != x_shape:
@@ -103,6 +89,7 @@ class CustomTPMSModel(TPMSModel):
                 f"x/y/z shape {x_shape}."
             )
         self._field = field
+        self._field_function = field_function
 
         # TPMSModel.__init__ requires px/py/pz positionally (it stores and
         # later saves them, like every other parameter) even though this
@@ -126,8 +113,42 @@ class CustomTPMSModel(TPMSModel):
             F(x, y, z), same shape as self.x.
         """
         return self._field
+    
+    # =====================================================================
+    # 2b) _implicit_field_at
+    # =====================================================================
+    def _implicit_field_at(self, x: np.ndarray, y: np.ndarray, z: np.ndarray) -> np.ndarray:
+        """
+        ============================================================================
+        2b) _IMPLICIT_FIELD_AT
+        Returns F at any given points by calling the field_function supplied
+        at construction time. Used by density_field_at() and therefore by
+        generate_mesh_adaptive().
+        ============================================================================
 
+        PARAMETERS
+        ----------
+        x, y, z : np.ndarray
+            Positions where F is evaluated, any shape (all three the same).
 
+        RETURNS
+        -------
+        implicit_field : np.ndarray
+            F(x, y, z), same shape as x.
+
+        RAISES
+        ------
+        NotImplementedError
+            If the model was built without field_function (e.g. a field
+            imported from a file): only the grid values exist, so F cannot
+            be evaluated anywhere else.
+        """
+        if self._field_function is None:
+            raise NotImplementedError(
+                "This CustomTPMSModel only has a field array on its grid: "
+                "pass field_function=... to use adaptive meshing.")
+        return self._field_function(x, y, z)
+    
 # =====================================================================
 # 3) create_a_custom_tpms
 # =====================================================================
