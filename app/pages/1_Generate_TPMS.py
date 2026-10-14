@@ -200,6 +200,8 @@ class TPMSParams:
     field_mode: str = "Threshold"
     threshold: Union[float, np.ndarray] = 0.0
     thickness: Union[float, np.ndarray] = 1.0
+    threshold_function: Optional[Callable] = None   # threshold as a function of position ("Custom equation" source only), for adaptive meshing
+    thickness_function: Optional[Callable] = None   # thickness as a function of position ("Custom equation" source only), for adaptive meshing
     # ----- baseplate -----
     baseplate_thickness: float = 0.0
     # ----- combine with geometry -----
@@ -326,8 +328,8 @@ def _make_user_define_parameters(params: TPMSParams):
     # ------ density_field field definition ------
     st.subheader("Density Field Definition")
     params.field_mode = render_field_mode()
-    params.threshold = render_threshold(params.field_mode, params=params)
-    params.thickness = render_thickness(params.field_mode, params=params)
+    params.threshold, params.threshold_function = render_threshold(params.field_mode, params=params)
+    params.thickness, params.thickness_function = render_thickness(params.field_mode, params=params)
 
     st.divider()
     # ----- add baseplate ------

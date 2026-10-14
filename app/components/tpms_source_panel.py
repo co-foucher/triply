@@ -168,7 +168,7 @@ def load_STL(stl_path: str) -> tuple[np.ndarray, np.ndarray]:
 # =====================================================================
 # 4) render_threshold
 # =====================================================================
-def render_threshold(field_mode: str, params) -> np.ndarray:
+def render_threshold(field_mode: str, params) -> Tuple[Union[float, np.ndarray], Optional[Callable]]:
     """
     ============================================================================
     4) RENDER_THRESHOLD
@@ -185,15 +185,20 @@ def render_threshold(field_mode: str, params) -> np.ndarray:
 
     RETURNS
     -------
-    threshold : float
-        The level/threshold value.
+    threshold : float or np.ndarray
+        The level/threshold value (constant), or its values on the grid
+        (custom equation or imported file).
+    threshold_function : callable or None
+        "Custom equation" only: the same equation as a function of ANY points,
+        threshold_function(x, y, z), so adaptive meshing can evaluate it between
+        grid points. None for "Constant" and "Import from file".
     """
     threshold_field_source = st.segmented_control( "Threshold", ["Constant", "Custom equation", "Import from file"], default="Constant", key="tpms_threshold_source",)
     if threshold_field_source == "Constant":
         value = st.number_input(
             "Field threshold",
             value=0.0, key="tpms_threshold", label_visibility="collapsed")
-        return value
+        return value, None
     elif threshold_field_source == "Custom equation":
         custom_threshold_equation = render_equation_input(label="Custom threshold", 
                                                         default_equation = "0.3 + 0.8 * x / max(abs(x))", 
@@ -204,10 +209,14 @@ def render_threshold(field_mode: str, params) -> np.ndarray:
                                                         origin_x=params.origin_x, origin_y=params.origin_y, origin_z=params.origin_z)
         if custom_threshold_equation is None:
             st.error("Please enter a valid custom threshold equation.")
-            return np.full_like(params.u, 0.0)
+            return np.full_like(params.u, 0.0), None
         else:
             custom_threshold = evaluate_custom_inputs(custom_threshold_equation, params.u, params.v, params.w)
-            return np.array(custom_threshold)
+            # the same equation as a function of ANY points (needed by adaptive meshing)
+            custom_threshold_function = make_field_function(
+                custom_threshold_equation, params.u, params.v, params.w
+            )
+            return np.array(custom_threshold), custom_threshold_function
     elif threshold_field_source == "Import from file":
         browse_file(
                 key="tpms_threshold_matrix_path",
@@ -220,9 +229,9 @@ def render_threshold(field_mode: str, params) -> np.ndarray:
         if threshold_matrix is not None:
             if threshold_matrix.shape != (params.resolution,) * 3:
                     threshold_matrix = _adapt_resolution(threshold_matrix, params)
-            return threshold_matrix
+            return threshold_matrix, None
 
-    return 0.0
+    return 0.0, None
             
 
 # =====================================================================
@@ -231,7 +240,7 @@ def render_threshold(field_mode: str, params) -> np.ndarray:
 def render_thickness(
     field_mode: str,
     params,
-) -> Optional[float]:
+) -> Tuple[Union[float, np.ndarray], Optional[Callable]]:
     """
     ============================================================================
     5) RENDER_THICKNESS
@@ -248,6 +257,12 @@ def render_thickness(
     RETURNS
     -------
     thickness : float or np.ndarray
+        The thickness (constant), or its values on the grid (custom equation
+        or imported file).
+    thickness_function : callable or None
+        "Custom equation" only: the same equation as a function of ANY points,
+        thickness_function(x, y, z), so adaptive meshing can evaluate it between
+        grid points. None for "Constant" and "Import from file".
     """
 
     if field_mode not in SHEET_MODES:
@@ -255,13 +270,13 @@ def render_thickness(
         st.caption(
             f"Note: thichkness is not used in {mode_label}' mode."
         )
-        return 0.0  # thickness is ignored in skeletal modes
+        return 0.0, None  # thickness is ignored in skeletal modes
 
     if field_mode in SHEET_MODES:
         #thickness_field_source = st.radio("Field Thickness", ["Constant", "Custom equation", "Import from file"], horizontal=True, key="thickness_field_source")
         thickness_field_source = st.segmented_control( "Thickness", ["Constant", "Custom equation", "Import from file"], default="Constant", key="tpms_thickness_source",)
         if thickness_field_source == "Constant":
-            return st.number_input("Thickness", value=0.6, min_value=0.05, key="tpms_thickness", label_visibility="collapsed")
+            return st.number_input("Thickness", value=0.6, min_value=0.05, key="tpms_thickness", label_visibility="collapsed"), None
         elif thickness_field_source == "Custom equation":
             custom_thickness_equation = render_equation_input(label="Custom thickness equation", 
                                                               default_equation = "0.3 + 0.8 * x / max(abs(x))", 
@@ -270,10 +285,14 @@ def render_thickness(
                                                               origin_x=params.origin_x, origin_y=params.origin_y, origin_z=params.origin_z)
             if custom_thickness_equation is None:
                 st.error("Please enter a valid custom thickness equation.")
-                return 1.0
+                return 1.0, None
             else:
                 custom_thickness = evaluate_custom_inputs(custom_thickness_equation, params.u, params.v, params.w)
-                return custom_thickness
+                # the same equation as a function of ANY points (needed by adaptive meshing)
+                custom_thickness_function = make_field_function(
+                    custom_thickness_equation, params.u, params.v, params.w
+                )
+                return custom_thickness, custom_thickness_function
         elif thickness_field_source == "Import from file":
             browse_file(
                     key="tpms_thickness_matrix_path",
@@ -286,8 +305,8 @@ def render_thickness(
             if thickness_matrix is not None:
                 if thickness_matrix.shape != (params.resolution,) * 3:
                         thickness_matrix = _adapt_resolution(thickness_matrix, params)
-                return thickness_matrix
-    return 0.0
+                return thickness_matrix, None
+    return 0.0, None
 
 
 # =====================================================================
@@ -337,11 +356,11 @@ def find_unsupported_adaptive_inputs(params) -> list:
             if np.ndim(period) != 0 and period_function is None:
                 reasons.append(f"Period {axis} imported from a file is only known on the grid: use Constant or Custom.")
 
-    # threshold and thickness are given to the model as arrays when they come from an equation or a file
-    if np.ndim(params.threshold) != 0:
-        reasons.append("A threshold from a custom equation or a file is only known on the grid: use Constant.")
-    if np.ndim(params.thickness) != 0:
-        reasons.append("A thickness from a custom equation or a file is only known on the grid: use Constant.")
+    # threshold and thickness: a constant, or a Custom equation (kept as a function) are fine; an imported matrix is not
+    if np.ndim(params.threshold) != 0 and params.threshold_function is None:
+        reasons.append("A threshold imported from a file is only known on the grid: use Constant or Custom equation.")
+    if np.ndim(params.thickness) != 0 and params.thickness_function is None:
+        reasons.append("A thickness imported from a file is only known on the grid: use Constant or Custom equation.")
 
     # the geometry combination edits the density field on the grid, which adaptive meshing never reads
     if params.geometry is not None:
@@ -438,6 +457,14 @@ def generate_ui_tpms(
             # ----- Import from file ------
             elif params.implicit_field_source == "Import from file":
                 model = CustomTPMSModel(params.x, params.y, params.z, params.thickness, field=params.field)
+
+            # ----- custom threshold / thickness: keep their functions, so the model can evaluate them at any point (adaptive meshing) ------
+            # Cartesian only: the functions take (u, v, w), which equal (x, y, z) only on the Cartesian grid.
+            # In Cylindrical / Spherical mode the model keeps the arrays computed in (u, v, w).
+            if params.grid_mode == "Cartesian":
+                for name, point_function in (("level", params.threshold_function), ("thickness", params.thickness_function)):
+                    if point_function is not None:
+                        model.set_point_function(name, point_function)
 
             # ---- compute density_field ------
             if params.field_mode in SKELETAL_MODES:   # "signed", "signed_inverse"
