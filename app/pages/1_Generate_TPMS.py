@@ -509,6 +509,19 @@ def _export_thickness_field(model, name):
         return "success", f"Saved {out_path}"
     return "error", "Thickness field is not a valid 3D array, nothing saved."
 
+def _export_density_field(model, name):
+    """Save the density field (the grid that marching cubes turned into the mesh).
+
+    This is the field *after* any geometry combination (union / intersection /
+    subtraction), because generate_ui_tpms() edits model.density_field in place.
+    The mesh is its density = 0 iso-surface: solid where density > 0.
+    """
+    if model.density_field is None:
+        return "warning", "No density field to export."
+    out_path = get_output_dir() / f"{name}_density.npy"
+    np.save(out_path, model.density_field)
+    return "success", f"Saved {out_path}"
+
 
 # Full page width, below the two columns
 st.divider()
@@ -517,16 +530,22 @@ if model is not None and model.faces is not None:
     with st.container(border=True):
         name = st.text_input("File name", value="my_tpms", key="tpms_file_name",
                              help=f"Files are written to {get_output_dir()}")
-        col_stl, col_field, col_thickness, col_all = st.columns(4)
+        col_stl, col_field, col_density, col_thickness, col_all = st.columns(5)
         exporters = []  # what the clicked button asks for (at most one button is clicked per rerun)
         if col_stl.button("STL mesh", icon=":material/deployed_code:", width="stretch"):
             exporters = [_export_stl]
-        if col_field.button("Implicit field (.npy)", icon=":material/grid_on:", width="stretch"):
+        if col_field.button("Implicit field (.npy)", icon=":material/grid_on:", width="stretch",
+                            help="The raw TPMS function F (e.g. sin(X)cos(Y) + ...) on the grid, "
+                                "before the field mode, threshold, thickness and any geometry combination."):
             exporters = [_export_implicit_field]
+        if col_density.button("Density field (.npy)", icon=":material/blur_on:", width="stretch",
+                              help="The field the mesh was extracted from (solid where > 0), "
+                                   "after any geometry combination."):
+            exporters = [_export_density_field]
         if col_thickness.button("Thickness field (.npy)", icon=":material/line_weight:", width="stretch"):
             exporters = [_export_thickness_field]
         if col_all.button("Export all", type="primary", icon=":material/download:", width="stretch"):
-            exporters = [_export_stl, _export_implicit_field, _export_thickness_field]
+            exporters = [_export_stl, _export_implicit_field, _export_density_field, _export_thickness_field]
         for exporter in exporters:
             status, message = exporter(model, name)
             getattr(st, status)(message)  # e.g. st.success(message)
