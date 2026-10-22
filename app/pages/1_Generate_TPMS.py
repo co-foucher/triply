@@ -541,7 +541,7 @@ if model is not None and model.faces is not None:
                                 "before the field mode, threshold, thickness and any geometry combination."):
             exporters = [_export_implicit_field]
         if col_density.button("Density field (.npy)", icon=":material/blur_on:", width="stretch",
-                              help="The field the mesh was extracted from (solid where > 0), "
+                              help="The field the mesh was extracted from (solid = 1, void = 0), "
                                    "after any geometry combination."):
             exporters = [_export_density_field]
         if col_thickness.button("Thickness field (.npy)", icon=":material/line_weight:", width="stretch"):
