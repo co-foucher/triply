@@ -27,6 +27,9 @@ from .CT_visualization_window import open_window, lightweigth_open
 12 - find_islands
 13 - watershed_algorithm
 14 - convert_jpg_to_mhd
+15 - apply_mask_on_image
+16 - invert_mask
+17 - convert_data_type
 #=====================================================================================================================
 """
 
@@ -890,3 +893,103 @@ def invert_mask(mask):
 
     inverted_mask = np.where(mask > 0, 0, 255)
     return inverted_mask
+
+
+# =====================================================================
+# 17) convert_data_type
+# =====================================================================
+# Data types convert_data_type can produce.
+SUPPORTED_DATA_TYPES = ("uint8", "uint16", "uint32", "uint64", "float32", "float64")
+
+
+def convert_data_type(image, data_type):
+    """
+    ============================================================================
+    17) CONVERT_DATA_TYPE
+    Converts a 3D volume to another data type, linearly rescaling its values
+    so that its minimum and maximum span the whole range of the new type.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    image : SimpleITK Image or np.ndarray
+        The 3D (Z, Y, X) volume to convert, of any numeric (or boolean) type.
+    data_type : str or np.dtype
+        One of SUPPORTED_DATA_TYPES: "uint8", "uint16", "uint32", "uint64",
+        "float32", "float64".
+
+    RETURNS
+    -------
+    converted_image : np.ndarray
+        Same shape as `image`, of type `data_type`.
+
+    RAISES
+    ------
+    ValueError
+        Unsupported data type, a volume that is not 3D, or a volume holding
+        NaN / infinite values (its minimum and maximum are then undefined).
+
+    NOTES
+    -----
+    Mapping, with m / M = minimum / maximum of the input volume and
+    [a, b] = output range:
+        output = a + (input - m) * (b - a) / (M - m)
+    so m -> a, M -> b, and every value in between is placed proportionally.
+    - Integer types: [a, b] = [0, largest value of the type], e.g. [0, 255]
+      for uint8; the result is rounded to the nearest integer (np.rint).
+    - Float types: [a, b] = [0, 1]. The "full range" of a float type
+      (about +-3.4e38 for float32) would make any later arithmetic overflow
+      to inf, so floats are normalised to [0, 1] instead.
+    - Constant volume (M == m): there is no range to stretch, every voxel
+      becomes a (0).
+    - uint64: its largest value, 2**64 - 1, can't be represented exactly in
+      float64 (the type the arithmetic is done in); the nearest float64,
+      2**64, would overflow when cast back. b is therefore the largest
+      float64 below 2**64, i.e. 2**64 - 2048: the maximum maps there, not
+      exactly to 2**64 - 1.
+    - The arithmetic is done in float64 one Z-slice at a time, so the extra
+      memory needed on top of the output is one slice, not one volume.
+    """
+    if isinstance(image, sitk.Image):
+        image = sitk.GetArrayFromImage(image)
+    image = np.asarray(image)
+
+    # ------ check the inputs ------
+    if str(np.dtype(data_type)) not in SUPPORTED_DATA_TYPES:
+        raise ValueError(f"Unsupported data type '{data_type}'. Choose one of {SUPPORTED_DATA_TYPES}.")
+    target_type = np.dtype(data_type)
+    if image.ndim != 3:
+        raise ValueError(f"Expected a 3D (Z, Y, X) volume, got an array of shape {image.shape}.")
+
+    # ------ input range [m, M] ------
+    input_min = float(image.min())
+    input_max = float(image.max())
+    if not (np.isfinite(input_min) and np.isfinite(input_max)):
+        raise ValueError("The volume contains NaN or infinite values: its min / max are undefined.")
+
+    # ------ output range [a, b] ------
+    if np.issubdtype(target_type, np.integer):
+        output_min = 0.0
+        output_max = float(np.iinfo(target_type).max)
+        if int(output_max) > np.iinfo(target_type).max:      # only uint64: float64 rounded 2**64 - 1 up to 2**64
+            output_max = float(np.nextafter(output_max, 0.0))  # largest float64 below it
+    else:
+        output_min, output_max = 0.0, 1.0
+
+    # ------ linear mapping, one Z-slice at a time ------
+    if input_max > input_min:
+        scale = (output_max - output_min) / (input_max - input_min)
+    else:
+        scale = 0.0                                          # constant volume: everything -> output_min
+    converted_image = np.empty(image.shape, dtype=target_type)
+    for slice_index in range(image.shape[0]):
+        slice_values = image[slice_index, :, :].astype(np.float64)
+        scaled_slice = output_min + (slice_values - input_min) * scale
+        if np.issubdtype(target_type, np.integer):
+            scaled_slice = np.rint(scaled_slice)
+            np.clip(scaled_slice, output_min, output_max, out=scaled_slice)   # guards against float round-off
+        converted_image[slice_index, :, :] = scaled_slice
+
+    logger.info(f"Converted {image.dtype} [{input_min:g}, {input_max:g}] "
+                f"to {target_type} [{output_min:g}, {output_max:g}]")
+    return converted_image

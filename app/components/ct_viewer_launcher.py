@@ -31,10 +31,12 @@ import streamlit as st
 1 - render_lightweight_toggle
 2 - launch_ct_viewer
 3 - CT_histogram
+4 - launch_ct_viewer_for_selection
 #=====================================================================================================================
 """
 
-__all__ = ["render_lightweight_toggle", "launch_ct_viewer", "CT_histogram"]
+__all__ = ["render_lightweight_toggle", "launch_ct_viewer", "CT_histogram",
+           "launch_ct_viewer_for_selection"]
 
 
 # =====================================================================
@@ -152,8 +154,17 @@ def CT_histogram(hist: np.ndarray, bin_edges: np.ndarray) -> None:
     -------
     None
     """
+    ignore_zeroes = st.toggle("Ignore zeroes", value=False, key="histogram_ignore_zeroes")
+    # one centre and one width per bin, computed from the full set of edges
+    # (len(bin_edges) = len(hist) + 1), before any bin is removed
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     bin_width = bin_edges[1] - bin_edges[0]
+    if ignore_zeroes:
+        # one boolean per bin (length len(hist)): True for the bin whose
+        # interval [left edge, right edge) contains the greyvalue 0
+        bin_contains_zero = (bin_edges[:-1] <= 0) & (bin_edges[1:] > 0)
+        hist = hist[~bin_contains_zero]
+        bin_centers = bin_centers[~bin_contains_zero]
     fig = go.Figure(go.Bar(x=bin_centers, y=hist, width=bin_width))
     fig.update_layout(
         xaxis_title="Greyvalue",
@@ -163,3 +174,71 @@ def CT_histogram(hist: np.ndarray, bin_edges: np.ndarray) -> None:
         margin=dict(l=0, r=0, t=20, b=0),
     )
     st.plotly_chart(fig, width="stretch")
+
+
+# =====================================================================
+# 4) launch_ct_viewer_for_selection
+# =====================================================================
+def launch_ct_viewer_for_selection(mhd_path: str, selection_path: str) -> None:
+    """
+    ============================================================================
+    4) LAUNCH_CT_VIEWER_FOR_SELECTION
+    Opens the full viewer (open_window) on `mhd_path` in a separate
+    process, like launch_ct_viewer, and - when the user closes the window -
+    saves the voxels clicked with the brush to `selection_path`. Used by
+    the "Manual selection (viewer)" step of ct_pipeline.py.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    mhd_path : str
+        Path to the .mhd file to open (the loaded, original volume).
+    selection_path : str
+        .npz file written when the window is closed, holding:
+          - "pixels": int array of shape (N, 3), one row (x, y, slice) per
+            selected voxel - exactly what open_window returns;
+          - "shape": the (Z, Y, X) shape of the volume the clicks were made
+            on (SimpleITK's GetSize() is (X, Y, Z), hence the [::-1]).
+
+    RETURNS
+    -------
+    None
+        Returns immediately: the viewer runs in its own process, and the
+        app only notices the new file on its next rerun.
+
+    NOTES
+    -----
+    - Why a file: open_window does return the selected voxels, but in the
+      subprocess, so the Streamlit process never sees that return value.
+      The subprocess saves it instead.
+    - Written to "<name>.tmp.npz" first, then renamed (os.replace): the
+      app never reads a half-written file.
+    - If the window is closed with no voxel selected, nothing is written,
+      so a previous selection is not wiped by just opening and closing
+      the viewer. Each saved selection REPLACES the previous one (the
+      viewer always starts with nothing selected).
+    - Same matplotlib backend handling as launch_ct_viewer (QtAgg forced,
+      inherited MPLBACKEND removed) - see the comment there.
+    - `!r` writes each path as a quoted Python string literal, so Windows
+      backslashes and spaces in the paths survive inside the -c script.
+    """
+    env = os.environ.copy()
+    env.pop("MPLBACKEND", None)
+    os.makedirs(os.path.dirname(selection_path), exist_ok=True)
+    temporary_path = selection_path[:-len(".npz")] + ".tmp.npz"   # keeps the .npz ending, so np.savez doesn't add one
+    # the Python script run by the subprocess, one line per list entry
+    script = "\n".join([
+        "import os",
+        "import numpy as np",
+        "import matplotlib",
+        "matplotlib.use('QtAgg')",
+        "import SimpleITK as sitk",
+        "import triply.CT_visualization_window as w",
+        f"image = sitk.ReadImage({mhd_path!r})",
+        "pixels = np.asarray(w.open_window(image), dtype=np.int64).reshape(-1, 3)   # blocks until the window is closed",
+        "shape = np.array(image.GetSize()[::-1], dtype=np.int64)                    # (X, Y, Z) -> (Z, Y, X)",
+        "if len(pixels) > 0:",
+        f"    np.savez({temporary_path!r}, pixels=pixels, shape=shape)",
+        f"    os.replace({temporary_path!r}, {selection_path!r})",
+    ])
+    subprocess.Popen([sys.executable, "-c", script], env=env)
