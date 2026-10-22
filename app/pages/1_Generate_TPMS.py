@@ -519,7 +519,9 @@ def _export_density_field(model, name):
     if model.density_field is None:
         return "warning", "No density field to export."
     out_path = get_output_dir() / f"{name}_density.npy"
-    np.save(out_path, model.density_field)
+    is_solid = model.density_field > 0
+    occupancy = is_solid.astype(np.uint8)
+    np.save(out_path, occupancy)
     return "success", f"Saved {out_path}"
 
 
