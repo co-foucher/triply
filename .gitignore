@@ -15,6 +15,9 @@
 *.lock
 *.json
 *.npz
+*.csv
+*.sta
+*.msg
 
 # now folders
 # environments & caches
@@ -24,6 +27,7 @@ venv/
 .ruff_cache/
 .mypy_cache/
 .ipynb_checkpoints/
+./gui_outputs
 
 # packaging artifacts
 *.egg-info/

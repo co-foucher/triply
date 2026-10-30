@@ -22,6 +22,7 @@ from app.components.jobs import Job
 def mesh_job(log: Callable[[str], None],
                 stl_dir: str,
                 file_name: str,
+                mesh_output_name: str,
                 ftetwild_path: str,
                 epsilon: float,
                 edge_length: float,
@@ -37,6 +38,9 @@ def mesh_job(log: Callable[[str], None],
         Directory containing the STL file to mesh.
     file_name : str
         Name of the STL file (without extension) to mesh.
+    mesh_output_name : str
+        Name of the output mesh (without extension) - written as
+        <stl_dir>/<mesh_output_name>.inp.
     ftetwild_path : str
         Path to the fTetWild executable.
     epsilon : float
@@ -56,12 +60,13 @@ def mesh_job(log: Callable[[str], None],
         input_path=stl_dir + "/",
         output_path=stl_dir + "/",
         file_name=file_name,
+        output_name=mesh_output_name,
         FtetWild_path=ftetwild_path,
         epsilon=epsilon,
         edge_length=edge_length,
         CPU_cores=int(CPU_cores),
     )
-    log("fTetWild meshing finished - .inp file written.")
+    log(f"fTetWild meshing finished - {mesh_output_name}.inp written.")
     return True
 
 
@@ -70,8 +75,9 @@ def mesh_job(log: Callable[[str], None],
 # 2) create_abaqus_job
 # =====================================================================
 def create_abaqus_job(log: Callable[[str], None],
-                stl_dir: str,
-                file_name: str,
+                mesh_dir: str,
+                mesh_name: str,
+                output_name: str,
                 script_dir: str,
                 script_name: str,
                 young_modulus: float,
@@ -80,21 +86,57 @@ def create_abaqus_job(log: Callable[[str], None],
                 quadratic_tets: int = 0,
                 extra_args: Optional[dict] = None):
     """
-    Runs the chosen Abaqus generator script (noGUI) to turn the tet mesh into
-    a solver-ready Job-<file_name>.inp.
+    Create an ABAQUS simulation input file (Job-<output_name>.inp) from an
+    existing tetrahedral mesh by running the selected noGUI generator script.
 
-    `extra_args` carries the options that only some simulation types take -
-    the static/stiffness case needs axis, load, compression and tol_frac,
-    the frequency case needs none. They're forwarded as key=value arguments
-    on the Abaqus command line; see abaqus_tools.create_simulation().
+    PARAMETERS
+    ----------
+    log : Callable[[str], None]
+        Callback used to emit status/progress messages.
+    mesh_dir : str
+        Folder containing the tetrahedral mesh <mesh_name>.inp.
+    mesh_name : str
+        Name of the mesh file without the .inp extension.
+    output_name : str
+        Model/job name without the "Job-" prefix, e.g. "my_tpms-static". The
+        generator writes Job-<output_name>.inp and
+        generate_sim_logger_<output_name>.txt.
+    script_dir : str
+        Folder holding the copied generator script. Abaqus runs there, so the
+        simulation files and logs are written into it.
+    script_name : str
+        Name of the ABAQUS generator script to execute (for example static or frequency).
+    young_modulus : float
+        Material Young's modulus in the chosen unit system.
+    poisson_ratio : float
+        Material Poisson's ratio.
+    density : float
+        Material density in the chosen unit system.
+    quadratic_tets : int, optional
+        Element order flag passed to the generator (typically 0=linear, 1=quadratic).
+    extra_args : dict | None, optional
+        Optional simulation-specific arguments forwarded as key=value on the
+        ABAQUS command line. Used mainly by static/stiffness cases
+        (for example axis, load, compression, tol_frac).
+
+    RETURNS
+    -------
+    bool
+        True if the simulation input was generated successfully; False otherwise.
+
+    NOTES
+    -----
+    - Delegates execution to abaqus_tools.create_simulation().
+    - On failure, details are usually available in generate_sim_logger_<output_name>.txt.
     """
     log("Invoking ABAQUS (noGUI) to create the simulation input...")
     if extra_args:
         log("Load case: " + ", ".join(f"{k}={v}" for k, v in extra_args.items()))
     ok = abaqus_tools.create_simulation(
-        input_path=stl_dir + "/",
+        input_path=mesh_dir,
+        input_name=mesh_name,
         output_path=str(script_dir),
-        file_name=file_name,
+        output_name=output_name,
         script_name=script_name,
         young_modulus=young_modulus,
         poisson_ratio=poisson_ratio,
@@ -106,7 +148,7 @@ def create_abaqus_job(log: Callable[[str], None],
     if not ok:
         log(
             "Check generate_sim_logger_"
-            f"{file_name}.txt in the simulation folder for the reason - for the "
+            f"{output_name}.txt in the simulation folder for the reason - for the "
             "static case it is usually an empty face node set (raise the face "
             "tolerance) or a mesh that has no flat ends along the load axis."
         )

@@ -59,8 +59,9 @@ def _set_quadratic_tets(part, logger):
     part.setElementType(regions=(elements, ), elemTypes=(quad_tet, ))
     logger.info("mesh upgraded to quadratic tets (C3D10): %d elements." % len(elements))
 
-def built_simulation_of_gyroid(model_name:str, 
-                                working_path:str,
+def built_simulation_of_gyroid(mesh_path:str,
+                                output_dir:str,
+                                output_name:str,
                                 young_modulus:float,
                                 poisson_ratio:float,
                                 density:float,
@@ -80,24 +81,27 @@ def built_simulation_of_gyroid(model_name:str,
         return
     Path("temp_file.txt").unlink()  # as soon as you read it, delete it
     """
-    #working_path = os.getcwd()
-    parent_dir = os.path.dirname(working_path)
+    # The model and the job are both named after the output name
+    # (e.g. "my_tpms-frequency"), so the job file becomes Job-<output_name>.inp.
+    model_name = output_name
+    # writeInput() writes Job-<model_name>.inp into the current directory, so
+    # move there explicitly instead of relying on the folder Abaqus started in.
+    os.chdir(output_dir)
 
     # ================================================================
     # SECTION 1.1 : Configure logger to write to a file in the current working directory
     # ================================================================
-    log_file = os.path.join(working_path, "generate_sim_logger_"+ model_name +".txt")
+    log_file = os.path.join(output_dir, "generate_sim_logger_" + output_name + ".txt")
     logging.basicConfig(filename=log_file, level=logging.DEBUG,
                         format="%(asctime)s - %(levelname)s - %(message)s",
                         filemode='a')
     logger = logging.getLogger(__name__)
-    logger.info(f"Current working directory: {working_path}")
+    logger.info(f"Output folder: {output_dir}")
 
     # ================================================================
     # SECTION 2 : load inp file 
     # ================================================================
-    #model_name = "gyroid-z_change-6"
-    mesh_path = parent_dir + '/' + model_name + ".inp"
+    # mesh_path is given directly by the caller: <mesh_dir>/<mesh_name>.inp
 
     logger.info(f"loading file : {mesh_path}")
 
@@ -186,7 +190,7 @@ def built_simulation_of_gyroid(model_name:str,
         numDomains=14, numGPUs=0)
     mdb.jobs['Job-' + model_name].writeInput(consistencyChecking=ON)
 
-    logger.info(f"job has been created : {working_path}/Job-{model_name}.inp")
+    logger.info(f"job has been created : {output_dir}/Job-{model_name}.inp")
     logger.info(f"Run it through : python abq_windows debug=DEBUG cpus=6 job=Job-{model_name}")
     logger.info(f"Simulation created successfully.")
     sys.stdout.flush()
@@ -196,14 +200,19 @@ if __name__ == "__main__":
     args = parse_kv_args(sys.argv[1:])
     if "input" not in args or not args["input"]:
         raise SystemExit('Missing required argument: input="..."')
-    model_name = args["input"]
-    working_path = args["output"]
+    # see the naming contract in triply.abaqus_tools.create_simulation()
+    input_arg = args["input"]                      # <mesh_dir>/<mesh_name>
+    output_arg = args["output"]                    # <sim_dir>/<mesh_name>-<kind>
+    mesh_path = input_arg + ".inp"                 # the tetrahedral mesh to load
+    output_dir = os.path.dirname(output_arg)       # where Job-<output_name>.inp and the log are written
+    output_name = os.path.basename(output_arg)     # model name AND job name (without "Job-")
     young_modulus = float(args.get("young_modulus", 300000))    # with this, if the args are not provided, default values are used
     poisson_ratio = float(args.get("poisson_ratio", 0.21))
     density = float(args.get("density", 3.9e-09))
     quadratic_tets = int(args.get("quadratic_tets", 0))
-    built_simulation_of_gyroid(model_name, 
-                            working_path, 
+    built_simulation_of_gyroid(mesh_path,
+                            output_dir,
+                            output_name,
                             young_modulus,
                             poisson_ratio,
                             density,

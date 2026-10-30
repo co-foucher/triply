@@ -146,12 +146,7 @@ def browse_file(key: str,
     RETURNS
     -------
     None
-        Writes to st.session_state[key] as a side effect of rendering
-        the text_input and of the Browse button's on_click callback
-        (which runs before the page reruns, so the text_input picks up
-        the dialog's result on the same rerun). Read
-        st.session_state[key] after calling this to get the current
-        path.
+        Writes to st.session_state[key] the chosen path
     """
 
     if not small_ui:

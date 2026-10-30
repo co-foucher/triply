@@ -18,6 +18,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from app.components.branding import PAGE_ICON
+from app.components.file_picker import browse_file, browse_directory
 
 st.set_page_config(page_title="Simulation", page_icon=PAGE_ICON, layout="wide")
 
@@ -54,7 +55,7 @@ with col_1:
         title="Select an STL file for simulation",
         filetypes=[("STL files", "*.stl"), ("All files", "*.*")],)
     stl_dir = st.session_state["structure_path"]
-    file_name = stl_dir.split("/")[-1].split(".")[0] if stl_dir else None
+    stl_file_name = stl_dir.split("/")[-1].split(".")[0] if stl_dir else None
     stl_dir = "/".join(stl_dir.split("/")[:-1]) if stl_dir else None
 
     # ------ inform fTetWild parameters ------
@@ -67,26 +68,38 @@ with col_1:
     cpu_cores = c2.number_input("CPU cores", value=1, min_value=1, step=1, help="Number of CPU cores to use for meshing. More cores = faster meshing.")
     edge_length = c3.number_input("Edge length", value=0.05, min_value=0.000001, format="%.8f", help="Target edge length for the tetrahedral mesh (relative to the object's bounding box). Smaller values lead to finer meshes but longer runtimes.")
 
+    # ------ choose the output mesh name ------
+    # no `key`: the default follows the STL, so picking another STL resets it to that STL's name
+    mesh_output_name = st.text_input(
+        "Output mesh name",
+        value=stl_file_name or "",
+        help="Name of the output mesh file (without extension). The mesh will be "
+             "saved as <output mesh name>.inp next to the STL file.")
+
     # ------ run fTetWild meshing ------
     if st.button("Run fTetWild meshing"):
-        # if the user hasn't selected an STL file, show an error
-        if not stl_dir or not file_name:
+        # one if/elif chain, so any failed check stops the job from starting
+        if not stl_dir or not stl_file_name:
             st.error("Please select an STL file first.")
-        # if another meshing job is already running, don't start a new one
-        if st.session_state["jobs"].get(st.session_state.get("mesh_job_id")) is not None:
-            if st.session_state["jobs"].get(st.session_state.get("mesh_job_id")).status == "running":
+        elif not mesh_output_name:
+            st.error("Please give the output mesh a name.")
+        else:
+            # if another meshing job is already running, don't start a new one
+            previous_mesh_job = st.session_state["jobs"].get(st.session_state.get("mesh_job_id"))
+            if previous_mesh_job is not None and previous_mesh_job.status == "running":
                 st.warning("Meshing job is already running. Please wait for it to finish.")
-        else :
-            job_id = start_job(st.session_state["jobs"],
-                            f"mesh:{file_name}",
+            else:
+                job_id = start_job(st.session_state["jobs"],
+                            f"mesh:{mesh_output_name}",
                             mesh_job,
                             stl_dir=stl_dir,
-                            file_name=file_name,
+                            file_name=stl_file_name,
+                            mesh_output_name=mesh_output_name,
                             ftetwild_path=ftetwild_path,
                             epsilon=epsilon,
                             edge_length=edge_length,
                             CPU_cores=cpu_cores)
-            st.session_state["mesh_job_id"] = job_id
+                st.session_state["mesh_job_id"] = job_id
 
     render_job_status(st.session_state["jobs"], "mesh_job_id")
 
@@ -112,6 +125,12 @@ BUILTIN_SIM = {
     "Frequency analysis": "generate_frequency_sim.py",
     "Static analysis": "generate_static_sim.py",
 }
+# ending added to the mesh name to name the model/job of each simulation type:
+# Job-<mesh_name>-<suffix>.inp, so both types can sit side by side in <mesh_name>_sim
+BUILTIN_SIM_SUFFIX = {
+    "Frequency analysis": "frequency",
+    "Static analysis": "static",
+}
 BUILTIN_SIM_INFO = {
     "Frequency analysis": "Extract the first 10 natural frequencies of the structure.",
     "Static analysis": (
@@ -131,6 +150,37 @@ BUILTIN_SIM_INFO = {
 LOAD_CASE_SIM = {"Static analysis"}
 
 st.subheader("2. create ABAQUS simulation")
+
+# ------ choose where the tetrahedral mesh comes from ------
+mesh_source = st.segmented_control(
+    label="Mesh to simulate",
+    options=["Mesh from step 1", "Existing .inp file"],
+    default="Mesh from step 1",
+    key="mesh_source")
+
+if mesh_source == "Existing .inp file":
+    # browse_file() returns None - it writes the chosen path into st.session_state[key]
+    browse_file(key="imported_mesh_path",
+                title="Select a tetrahedral mesh (.inp)",
+                filetypes=[("inp files", "*.inp")],
+                small_ui=False)
+    mesh_path = st.session_state.get("imported_mesh_path")
+else:
+    # fTetWild writes <mesh_output_name>.inp next to the STL (see TET_mesh_tools.mesh_an_STL)
+    mesh_path = f"{stl_dir}/{mesh_output_name}.inp" if stl_dir and mesh_output_name else None
+
+# Split the mesh path into the two pieces every later section needs:
+#   mesh_dir  : folder holding the .inp - create_simulation() reads mesh_dir/mesh_name.inp
+#               and the <mesh_name>_sim output folder is created inside it
+#   mesh_name : file name without extension - the simulation files are then named
+#               after <mesh_name>-<kind> (see BUILTIN_SIM_SUFFIX)
+# as_posix() keeps the "/" separators the rest of the page builds paths with.
+if mesh_path:
+    mesh_dir = Path(mesh_path).parent.as_posix()
+    mesh_name = Path(mesh_path).stem
+else:
+    mesh_dir, mesh_name = None, None
+
 @st.fragment
 def create_simulation_section():
     col_1, col_2 = st.columns([1, 1.4])
@@ -165,6 +215,8 @@ def create_simulation_section():
         "density": density,
         "quadratic_mesh": quadratic_mesh,
         "load_case": load_case,
+        # model/job name without the "Job-" prefix, e.g. "my_tpms-static"
+        "output_name": f"{mesh_name}-{BUILTIN_SIM_SUFFIX[script_accro]}" if mesh_name else None,
     }
 
     with col_2:
@@ -173,7 +225,7 @@ def create_simulation_section():
         if script_accro in LOAD_CASE_SIM:
             # second preview of the same STL, this time showing where the load and
             # the supports land - cheap sanity check before a long solve.
-            rbm_coord = render_load_preview(mesh_name=file_name,
+            rbm_coord = render_load_preview(mesh_name=mesh_name,
                                 faces=faces,
                                 verts=verts,
                                 case=load_case,
@@ -185,18 +237,12 @@ def create_simulation_section():
                 temp = [str(x) for x in rbm_coord[1,:]]
                 st.session_state["sim_config"]["load_case"]["pin_b_coords"] = temp
                 st.warning(f"Pin B coordinates: {temp}")
-    
-
-
-
-
-create_simulation_section()
 
 @st.fragment
-def render_create_abaqus_section(stl_dir: str, file_name: str) -> None:
+def render_create_abaqus_section(mesh_dir: str, mesh_name: str) -> None:
     if st.button("Create ABAQUS simulation input"):
-        if not stl_dir or not file_name:
-            st.error("Please select an STL file first.")
+        if not mesh_dir or not mesh_name:
+            st.error("Please select a mesh first.")
         elif "sim_config" not in st.session_state:
             st.error("Set the simulation type / material properties above first.")
         else:
@@ -205,7 +251,7 @@ def render_create_abaqus_section(stl_dir: str, file_name: str) -> None:
             script_name = cfg["script_name"]
 
             # create a sub folder for the simulation output files, named after the STL file
-            sim_output_dir = Path(stl_dir) / f"{file_name}_sim"
+            sim_output_dir = Path(mesh_dir) / f"{mesh_name}_sim"
             sim_output_dir.mkdir(parents=True, exist_ok=True)
             # fetch the simulation script from the built-in scripts and write it to the output folder
             pybaqus_dir = Path(abaqus_tools.__file__).parent / "pybaqus"
@@ -214,10 +260,11 @@ def render_create_abaqus_section(stl_dir: str, file_name: str) -> None:
 
             # create a job to run the abaqus simulation in a background thread, passing the output folder and script name as arguments
             job_id = start_job(st.session_state["jobs"],
-                                f"abaqus:{file_name}",
+                                f"abaqus:{cfg['output_name']}",
                                 create_abaqus_job,
-                                stl_dir=stl_dir,
-                                file_name=file_name,
+                                mesh_dir=mesh_dir,
+                                mesh_name=mesh_name,
+                                output_name=cfg["output_name"],
                                 script_dir=sim_output_dir,
                                 script_name=script_path,
                                 young_modulus=cfg["young_modulus"],
@@ -228,8 +275,8 @@ def render_create_abaqus_section(stl_dir: str, file_name: str) -> None:
             st.session_state["abaqus_job_id"] = job_id              # you save it to be able to use it in the results section.
             st.session_state["sim_output_dir"] = sim_output_dir     # you save it to be able to use it in the results section.
 
-
-render_create_abaqus_section(stl_dir, file_name)
+create_simulation_section()
+render_create_abaqus_section(mesh_dir, mesh_name)
 render_job_status(st.session_state["jobs"], "abaqus_job_id")
 
 st.divider()
@@ -238,32 +285,74 @@ st.divider()
 # ====================== run ABAQUS simulation =========================
 # ======================================================================
 
+st.subheader("3. Run ABAQUS simulation")
+
 @st.fragment
-def render_run_abaqus_section(stl_dir: str, file_name: str) -> None:
-    st.subheader("3. Run ABAQUS simulation")
+def render_run_abaqus_section(mesh_dir: str, mesh_name: str) -> None:
+    # The input choice lives INSIDE the fragment so it is re-evaluated whenever this
+    # section reruns. "Input from step 2" depends on the simulation type picked in
+    # section 2 (through sim_config["output_name"]), and changing that type only reruns
+    # section 2's fragment - a path computed at page level would keep the old type's name.
+
+    # ------ choose where the simulation input (Job-<name>.inp) comes from ------
+    sim_input_source = st.segmented_control(
+        label="Simulation input to run",
+        options=["Input from step 2", "Existing Job-*.inp file"],
+        default="Input from step 2",
+        key="sim_input_source")
+
+    if sim_input_source == "Existing Job-*.inp file":
+        # browse_file() returns None - it writes the chosen path into st.session_state[key]
+        browse_file(key="imported_sim_input_path",
+                    title="Select a simulation input (Job-<name>.inp)",
+                    filetypes=[("ABAQUS job input", "Job-*.inp"), ("inp files", "*.inp")],
+                    small_ui=False)
+        sim_input_path = st.session_state.get("imported_sim_input_path")
+    else:
+        # create_abaqus_job writes Job-<output_name>.inp into the <mesh_name>_sim folder
+        # next to the mesh, with output_name = <mesh_name>-<kind> (see BUILTIN_SIM_SUFFIX)
+        output_name = st.session_state.get("sim_config", {}).get("output_name")
+        if mesh_dir and output_name:
+            sim_input_path = f"{mesh_dir}/{mesh_name}_sim/Job-{output_name}.inp"
+        else:
+            sim_input_path = None
+
+    # Split the simulation input path into the two pieces run_abaqus_job needs:
+    #   sim_dir  : folder holding Job-<sim_name>.inp - the solve runs in its "run" subfolder
+    #   sim_name : file name without extension AND without the "Job-" prefix, because
+    #              abaqus_tools.run_simulation() adds "Job-" back itself ("Job-" + file_name + ".inp")
+    # as_posix() keeps the "/" separators the rest of the page builds paths with.
+    if sim_input_path:
+        sim_dir = Path(sim_input_path).parent.as_posix()
+        sim_name = Path(sim_input_path).stem.removeprefix("Job-")
+    else:
+        sim_dir, sim_name = None, None
 
     CPU_CORES = st.slider("CPU cores for ABAQUS", min_value=1, max_value=16, value=1, step=1)
 
     if st.button("Run ABAQUS simulation"):
-        # if the user hasn't selected an STL file, show an error
-        if not stl_dir or not file_name:
-            st.error("Please select an STL file first.")
+        # if the user hasn't selected a simulation input, show an error
+        if not sim_dir or not sim_name:
+            st.error("Please select a simulation input first.")
+        # run_simulation() only looks for exactly sim_dir/Job-<sim_name>.inp - check it
+        # here so the user gets the error now instead of in the background job's log
+        elif not (Path(sim_dir) / f"Job-{sim_name}.inp").is_file():
+            st.error(f"Job-{sim_name}.inp not found in {sim_dir}. Create it in step 2 first, "
+                     "or select a file whose name starts with 'Job-'.")
         else:
-            # same folder create_abaqus_job wrote the simulation input into
-            sim_output_dir = Path(stl_dir) / f"{file_name}_sim"
             # if a run is already in progress for this session, don't start another one
             run_job = st.session_state["jobs"].get(st.session_state.get("run_job_id"))
             if run_job is not None and run_job.status == "running":
                 st.warning("A simulation run is already in progress. Please wait for it to finish.")
             else:
                 job_id = start_job(st.session_state["jobs"],
-                                    f"run:{file_name}",
+                                    f"run:{sim_name}",
                                     run_abaqus_job,
-                                    file_name=file_name,
-                                    sim_dir=sim_output_dir)
+                                    file_name=sim_name,
+                                    sim_dir=sim_dir)
                 st.session_state["run_job_id"] = job_id
 
-render_run_abaqus_section(stl_dir, file_name)
+render_run_abaqus_section(mesh_dir, mesh_name)
 render_job_status(st.session_state["jobs"], "run_job_id")
 
 
@@ -275,11 +364,11 @@ st.divider()
 st.subheader("4. Extract results from ODB")
 
 @st.fragment
-def render_extract_results_section(stl_dir: str, file_name: str) -> None:
-    # if the user hasn't selected an STL file, show an error
+def render_extract_results_section(mesh_dir: str, mesh_name: str) -> None:
+    # if the user hasn't selected a mesh, show an error
     if "static" in st.session_state["sim_config"]["script_name"]:
-        if not stl_dir or not file_name:
-            st.error("Please select an STL file first.")
+        if not mesh_dir or not mesh_name:
+            st.error("Please select a mesh first.")
         if not st.session_state.get("sim_output_dir"):
             st.error("Simulation output directory not found. Please run the simulation first.")
         else:
@@ -303,10 +392,11 @@ def render_extract_results_section(stl_dir: str, file_name: str) -> None:
                 for field_name in FIELD_NAMES:
                     # grab the simulation output folder from the session state, which was set by the create_simulation_section() function above.
                     sim_output_dir = st.session_state["sim_output_dir"]
-                    # the ODB file is always named after the STL file, with a .odb extension
-                    odb_path = sim_output_dir / f"run\\Job-{file_name}.odb"
-                    # the output CSV file will be named after the STL file, with a suffix indicating the field output extracted.
-                    out_path = sim_output_dir / f"run\\{file_name}_stress.csv"
+                    # the job (and so the ODB) is named after the output name <mesh_name>-<kind> set in section 2
+                    output_name = st.session_state["sim_config"]["output_name"]
+                    odb_path = sim_output_dir / f"run\\Job-{output_name}.odb"
+                    # the extracted values go to a CSV named after the same output name
+                    out_path = sim_output_dir / f"run\\{output_name}_stress.csv"
                     success = abaqus_tools.extract_field_at_nodeset(str(odb_path), nset_name, field_name, str(out_path))
                     if success:
                         # ------ read the extracted values back and add them as a row in the shared boxplot ------
@@ -335,6 +425,6 @@ def render_extract_results_section(stl_dir: str, file_name: str) -> None:
         st.error(f"No export defined for this simulation type: {st.session_state['sim_config']['load_case']}. Please run a simulation with a load case first.")
 
 if st.session_state.get("sim_output_dir") is not None or True:
-    render_extract_results_section(stl_dir, file_name)
+    render_extract_results_section(mesh_dir, mesh_name)
 else:
     st.info("Run a simulation first to extract results from the ODB file.")

@@ -20,8 +20,9 @@ import numpy as np
 # 1) create_simulation
 # =====================================================================
 def create_simulation(input_path:str,
+                      input_name:str,
                       output_path:str,
-                      file_name:str,
+                      output_name:str = None,
                       script_name:str = "generate_frequency_sim.py",
                       max_wait_time:int = 600, 
                       young_modulus:float = 300000.0,
@@ -39,12 +40,17 @@ def create_simulation(input_path:str,
     PARAMETERS
     ----------
     input_path : str
-        Path to the folder containing the input mesh file (should be an inp file).
+        Folder containing the tetrahedral mesh file.
+    input_name : str
+        Name of the mesh file without the .inp extension - the mesh read is
+        <input_path>/<input_name>.inp.
     output_path : str
-        Path to the folder where the simulation input file will be written
-        (again as an inp file).
-    file_name : str
-        Base name used to locate the input INP file and name the output files.
+        Folder where the simulation input Job-<output_name>.inp and the log
+        generate_sim_logger_<output_name>.txt are written. The Abaqus script
+        (script_name) must already be in this folder: Abaqus runs from here.
+    output_name : str, optional
+        Model and job name without the "Job-" prefix, e.g. "my_tpms-static".
+        Default = input_name.
     script_name : str, optional
         Name of the Abaqus script to run (without .py extension). This script
         should be located in output_path and should be designed to read the
@@ -78,8 +84,12 @@ def create_simulation(input_path:str,
       'generate_sim_logger.txt' and polls that file until a
       'Simulation created successfully' message is found in its last line.
     """
-    # Compose path to the input .inp (kept for compatibility with other code)
-    input_inp = Path(input_path + file_name + '.inp')
+    # the tetrahedral mesh the Abaqus script will load - checked here so a wrong
+    # path fails immediately instead of after the max_wait_time polling below
+    input_inp = Path(input_path) / f"{input_name}.inp"
+    if not input_inp.is_file():
+        logger.error(f"Mesh file not found: {input_inp}")
+        return False
     # folder where generate_sim.py lives and where we'll write temp files
     script_folder = Path(output_path)
     # Choose which Abaqus wrapper script to run based on requested simulation type
@@ -91,18 +101,25 @@ def create_simulation(input_path:str,
         logger.error(f"Unknown script name: {script_name}")
         return False
 
+    if output_name is None:
+        output_name = input_name
+
     # --- run abaqus headless from that folder ---
     # Running with `cwd=str(script_folder)` ensures Abaqus starts in the folder containing temp_file.txt
+    # first defining the inputs commun for every simulation type
     cmd = ["abaqus", "cae",
            "noGUI=" + script_name,
-           "--", "input=" + file_name,
-           "--", "output=" + output_path,
+           # one plain path string per side, without extension - the Abaqus script
+           # splits them again with os.path.dirname / os.path.basename
+           "--", "input=" + (Path(input_path) / input_name).as_posix(),
+           "--", "output=" + (Path(output_path) / output_name).as_posix(),
            "--", "young_modulus=" + str(young_modulus),
            "--", "poisson_ratio=" + str(poisson_ratio),
            "--", "density=" + str(density),
            "--", "quadratic_tets=" + str(quadratic_tets)
-           ]  # pass the file name as an argument to the script
-    # simulation-type-specific options (axis, load, ... for the static case)
+           ] 
+    
+    # the, define the simulation-type-specific options (axis, load, ... for the static case)
     for key, value in (extra_args or {}).items():
         cmd += ["--", f"{key}={value}"]
     logger.debug(f"Running command: {' '.join(cmd)} in {script_folder}")
@@ -110,25 +127,15 @@ def create_simulation(input_path:str,
     # The Abaqus scripts open their log with filemode='a', so a stale log from
     # a previous run would still end in "Simulation created successfully" and
     # the poll below would return True before this run wrote anything at all.
-    temp = Path(output_path) / ("generate_sim_logger_" + file_name + ".txt")
+    temp = Path(output_path) / ("generate_sim_logger_" + output_name + ".txt")
     temp.unlink(missing_ok=True)
 
     subprocess.run(cmd, check=True, cwd=str(script_folder), shell=True)
 
     # --- wait for external script to signal completion ---
-    # The external script writes 'generate_sim_logger_<file_name>.txt' and ends
-    # it with either 'Simulation created successfully' or 'Simulation creation
-    # FAILED: <reason>'. We poll that file until one of the two shows up.
-    #
-    # NOTE: the timeout is checked at the top of the loop, not only on the
-    # file-not-found path. A script that starts, writes a few log lines and
-    # then dies (or hits a case it can't handle - e.g. the static script
-    # finding an empty face node set) leaves a log file that exists but never
-    # reaches a terminal line; guarding only the missing-file branch would
-    # spin here forever, and this runs in a background job thread that nothing
-    # can cancel.
     start_time = time.time()
     while True:
+        # if the log file is not created within max_wait_time, give up
         if time.time() - start_time > max_wait_time:
             logger.warning(f"Simulation creation did not complete within {max_wait_time} seconds. Giving up")
             return False
