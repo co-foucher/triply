@@ -1,3 +1,7 @@
+# triply: design, meshing, simulation and CT analysis of TPMS structures
+# Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
+# SPDX-License-Identifier: MIT
+
 """
 Library: browse previously generated TPMS structures (.stl + .html preview
 pairs) saved in the current output folder.

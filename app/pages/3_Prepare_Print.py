@@ -1,3 +1,7 @@
+# triply: design, meshing, simulation and CT analysis of TPMS structures
+# Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
+# SPDX-License-Identifier: MIT
+
 """
 Prepare an STL for 3D printing: voxelize it, label its overhangs, bridges
 and required supports, and search for the print orientation that needs the

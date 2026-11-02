@@ -1,3 +1,7 @@
+# triply: design, meshing, simulation and CT analysis of TPMS structures
+# Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
+# SPDX-License-Identifier: MIT
+
 """
 Ordered, reorderable processing pipeline for a loaded CT volume, built on
 top of triply.CT_scans's individual filter functions (threshold,

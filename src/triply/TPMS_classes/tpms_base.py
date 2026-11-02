@@ -1,3 +1,7 @@
+# triply: design, meshing, simulation and CT analysis of TPMS structures
+# Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
+# SPDX-License-Identifier: MIT
+
 from typing import Optional
 import numpy as np
 from typing import Optional, Tuple, Union
@@ -504,19 +508,8 @@ class TPMSModel:
         RETURNS
         -------
         density_field : np.ndarray
-            The computed scalar field (also stored in self.density_field;
-            self.v remains available as a deprecated alias).
+            a field, equal to 1 where the solid should be and -1 outside.
 
-        NOTES
-        -----
-        - spacing: voxel spacing used when computing distance transform (only
-          for mode="distance"/"distance_fast").
-        - physical_thickness: desired wall thickness in spatial units (only
-          used for "distance" modes). May be a scalar or an ndarray with the
-          same shape as x/y/z.
-        - thickness and level are read with _value_at(): a function set with
-          set_point_function("thickness" / "level", ...) takes priority over
-          self.thickness / the level argument.
         """
         if mode is None:
             mode = self.DEFAULT_FIELD_MODE
@@ -530,18 +523,24 @@ class TPMSModel:
             # thickness interpreted in implicit_field-value units (supports scalar or per-voxel thickness)
             logger.info(f"Computing band field")
             self.density_field = thickness - np.abs(self.implicit_field - level)
+            self.density_field[self.density_field < 0] = -1
+            self.density_field[self.density_field >= 0] = 1
             return self.density_field
 
         if mode == "signed":
             # level-set network relative to the provided level
             logger.info(f"Computing signed field (level={level})")
             self.density_field = self.implicit_field - level
+            self.density_field[self.density_field < 0] = -1
+            self.density_field[self.density_field >= 0] = 1
             return self.density_field
 
         if mode == "signed_inverse":
             # complement of "signed": solid on the other side of the same level surface
             logger.info(f"Computing signed_inverse field (level={level})")
             self.density_field = level - self.implicit_field
+            self.density_field[self.density_field < 0] = -1
+            self.density_field[self.density_field >= 0] = 1
             return self.density_field
 
         if mode in ("distance", "distance_fast"):
@@ -585,7 +584,7 @@ class TPMSModel:
 
             # final field: positive inside the desired wall band, zero outside
             self.density_field = np.zeros_like(dist) - 1
-            self.density_field[mask] = dist[mask]
+            self.density_field[mask] = 1
             #logger.info("Max: %s, Min: %s", self.density_field.max(), self.density_field.min())
             return self.density_field
 

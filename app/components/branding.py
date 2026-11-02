@@ -1,3 +1,7 @@
+# triply: design, meshing, simulation and CT analysis of TPMS structures
+# Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
+# SPDX-License-Identifier: MIT
+
 """
 coroforge branding: where the logo files live, and the one call that puts
 the logo in the sidebar.

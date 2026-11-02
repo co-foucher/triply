@@ -1,3 +1,7 @@
+# triply: design, meshing, simulation and CT analysis of TPMS structures
+# Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
+# SPDX-License-Identifier: MIT
+
 """
 Streamlit widgets for the uniaxial (stiffness) load case: the parameter
 form and the 3D preview of where the load and the supports land.

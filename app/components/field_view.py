@@ -1,3 +1,7 @@
+# triply: design, meshing, simulation and CT analysis of TPMS structures
+# Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
+# SPDX-License-Identifier: MIT
+
 """
 2D slice viewer for a TPMS scalar field (model.v) - meant to sit above the
 3D mesh preview so the field can be sanity-checked before/alongside the

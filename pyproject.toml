@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "triply"
-version = "4.1.0"
+version = "4.2.0"
 description = "Gyroid and lattice design utilities: field generation, mesh processing, STL/INP I/O, and simulation helpers."
 authors = [
     { name = "Corentin Foucher", email = "corentin.foucher@empa.ch" }
 ]
 readme = "README.md"
-license = { text = "EMPA" }
+license = { text = "MIT" }
 requires-python = "==3.10.*"
 
 dependencies = [
@@ -20,7 +20,6 @@ dependencies = [
     "scikit-image==0.25.2",
     "trimesh==4.11.1",
     "plotly==6.5.2",
-    "pymeshfix==0.18.0",
     "pyvista==0.46.5",
     "meshio==5.3.5",
     "pathlib==1.0.1",
@@ -51,7 +50,7 @@ keywords = [
 
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: Other/Proprietary License",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Visualization",
     "Topic :: Scientific/Engineering :: Mathematics",

@@ -1,3 +1,7 @@
+# triply: design, meshing, simulation and CT analysis of TPMS structures
+# Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
+# SPDX-License-Identifier: MIT
+
 """
 Generate a TPMS structure: pick a built-in surface type or paste a custom
 equation, set periods/thickness/resolution/mesh options, preview the
