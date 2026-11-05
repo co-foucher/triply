@@ -24,14 +24,29 @@ DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "gui_outputs"
 
 def init_state() -> None:
     """
+    ============================================================================
+    INIT_STATE
     Populates st.session_state with default keys the first time any page
-    runs. Safe to call at the top of every page (setdefault is a no-op on
-    reruns).
+    runs, and draws the sidebar shared by every page. Safe to call at the
+    top of every page (setdefault is a no-op on reruns).
+    ============================================================================
+
+    RETURNS
+    -------
+    None
+
+    NOTES
+    -----
+    - Keys set if missing: "output_dir" (DEFAULT_OUTPUT_DIR, i.e. app/gui_outputs),
+      "current_model" (None), "current_equation" (None), "jobs" ({}).
+    - Sidebar: the logo (render_sidebar_logo), the "Output folder" text input
+      (writes st.session_state["output_dir"]) and the log-level selector
+      (set_log_level).
     """
     st.session_state.setdefault("output_dir", str(DEFAULT_OUTPUT_DIR))
     st.session_state.setdefault("current_model", None)      # last generated TPMSModel instance
     st.session_state.setdefault("current_equation", None)    # equation string, if a custom TPMS was used
-    st.session_state.setdefault("jobs", {})                  # job_id -> app.jobs.Job
+    st.session_state.setdefault("jobs", {})                  # job_id -> app.components.jobs.Job
 
     render_sidebar_logo()
 
@@ -45,7 +60,17 @@ def init_state() -> None:
 
 
 def get_output_dir() -> Path:
-    """Returns the current session's output directory, creating it if needed."""
+    """
+    ============================================================================
+    GET_OUTPUT_DIR
+    Returns the current session's output directory, creating it if needed.
+    ============================================================================
+
+    RETURNS
+    -------
+    output_dir : Path
+        st.session_state["output_dir"], or DEFAULT_OUTPUT_DIR if not set yet.
+    """
     d = Path(st.session_state.get("output_dir", DEFAULT_OUTPUT_DIR))
     d.mkdir(parents=True, exist_ok=True)
     return d

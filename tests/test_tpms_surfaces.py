@@ -36,7 +36,7 @@ splitp_mod = pytest.importorskip("triply.TPMS_classes.tpms_splitp")
 # 0 - independent formula reimplementations (one per surface)
 # ============================================================================
 # Each of these is a hand-written copy of that surface's _implicit_field(),
-# taken from its docstring/NOTES section, so compute_field() gets checked
+# taken from its docstring/NOTES section, so compute_density_field() gets checked
 # against an independent implementation rather than against itself.
 
 def _gyroid_term(x, y, z, px, py, pz):
@@ -160,7 +160,7 @@ class TestTPMSSurfaceFormulas:
         """mode="band" should equal thickness - |implicit_field|, per TPMSModel's docstring, for every surface."""
         x, y, z = small_grid
         model = model_cls(x, y, z, 1.3, 1.1, 0.9, 0.25)
-        v = model.compute_field(mode="band")
+        v = model.compute_density_field(mode="band", binary_output=False)
         expected = 0.25 - np.abs(term_fn(x, y, z, 1.3, 1.1, 0.9))
         np.testing.assert_allclose(v, expected)
 
@@ -168,7 +168,7 @@ class TestTPMSSurfaceFormulas:
         """mode="signed" should equal implicit_field - level (a plain level-set, no abs()), for every surface, regardless of thickness."""
         x, y, z = small_grid
         model = model_cls(x, y, z, 1.3, 1.1, 0.9, 0.25)
-        v = model.compute_field(mode="signed", level=0.25)
+        v = model.compute_density_field(mode="signed", level=0.25, binary_output=False)
         expected = term_fn(x, y, z, 1.3, 1.1, 0.9) - 0.25
         np.testing.assert_allclose(v, expected)
 
@@ -176,16 +176,16 @@ class TestTPMSSurfaceFormulas:
         """mode="signed_inverse" should equal level - implicit_field, the exact negation of "signed"'s result at the same level, for every surface."""
         x, y, z = small_grid
         model = model_cls(x, y, z, 1.3, 1.1, 0.9, 0.25)
-        v = model.compute_field(mode="signed_inverse", level=0.25)
+        v = model.compute_density_field(mode="signed_inverse", level=0.25, binary_output=False)
         expected = 0.25 - term_fn(x, y, z, 1.3, 1.1, 0.9)
         np.testing.assert_allclose(v, expected)
 
     def test_default_field_mode_matches_class_attribute(self, small_grid, model_cls, term_fn, default_mode):
-        """Each class's DEFAULT_FIELD_MODE should match what's documented (_CASES above), and compute_field() with no mode argument should behave exactly like passing that mode explicitly."""
+        """Each class's DEFAULT_FIELD_MODE should match what's documented (_CASES above), and compute_density_field() with no mode argument should behave exactly like passing that mode explicitly."""
         x, y, z = small_grid
         model = model_cls(x, y, z, 1.3, 1.1, 0.9, 0.25)
         assert model.DEFAULT_FIELD_MODE == default_mode
 
-        v_default = model.compute_field()
-        v_explicit = model.compute_field(mode=default_mode)
+        v_default = model.compute_density_field()
+        v_explicit = model.compute_density_field(mode=default_mode)
         np.testing.assert_allclose(v_default, v_explicit)

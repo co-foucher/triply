@@ -2,14 +2,13 @@
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
 
-from pathlib import Path
-import time
-import subprocess
-import shutil
-from .logger import logger
-import numpy as np
-
 """
+============================================================================
+ABAQUS_TOOLS
+Driving ABAQUS from Python: create a simulation input from a tet mesh, run
+it, wait for it, extract results from the ODB.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - create_simulation
@@ -19,6 +18,13 @@ import numpy as np
 5 - extract_field_at_nodeset
 #=====================================================================================================================
 """
+
+from pathlib import Path
+import time
+import subprocess
+import shutil
+from .logger import logger
+import numpy as np
 
 # =====================================================================
 # 1) create_simulation
@@ -37,8 +43,10 @@ def create_simulation(input_path:str,
     """
     ============================================================================
     1) CREATE_SIMULATION
-    Utility function to create an Abaqus simulation by invoking the appropriate
-    mesh file, output folder, and Abaqus script.
+    Creates an Abaqus simulation input file (.inp) from a tetrahedral mesh,
+    by running an Abaqus Python script (from pybaqus/) headless:
+    abaqus cae noGUI=<script_name> -- input=... -- output=... -- key=value ...
+    then waiting until that script reports success in its log file.
     ============================================================================
 
     PARAMETERS
@@ -49,20 +57,31 @@ def create_simulation(input_path:str,
         Name of the mesh file without the .inp extension - the mesh read is
         <input_path>/<input_name>.inp.
     output_path : str
-        Folder where the simulation input Job-<output_name>.inp and the log
-        generate_sim_logger_<output_name>.txt are written. The Abaqus script
-        (script_name) must already be in this folder: Abaqus runs from here.
+        Folder where Abaqus runs and where the simulation input
+        Job-<output_name>.inp and the log generate_sim_logger_<output_name>.txt
+        are written. The Abaqus script (script_name) must already be in this
+        folder.
     output_name : str, optional
         Model and job name without the "Job-" prefix, e.g. "my_tpms-static".
         Default = input_name.
     script_name : str, optional
-        Name of the Abaqus script to run (without .py extension). This script
-        should be located in output_path and should be designed to read the
-        mesh file specified by file_name and create the appropriate simulation
-        input files. Adjust this if you have different scripts for different
-        simulation types. Default = "generate_frequency_sim.py".
+        File name of the Abaqus script to run, WITH the .py extension, e.g.
+        "generate_static_sim.py". Must be in output_path.
+        Default = "generate_frequency_sim.py".
     max_wait_time : int, optional
-        Maximum time to wait for simulation creation, in seconds (default = 600).
+        Maximum time to wait for the script to report success, in seconds
+        (default = 600).
+    young_modulus : float, optional
+        Young's modulus (default = 300000.0, i.e. 300 GPa in MPa).
+    poisson_ratio : float, optional
+        Poisson's ratio (default = 0.21).
+    density : float, optional
+        Density (default = 3.9e-09, i.e. 3.9 g/cm^3 in t/mm^3).
+        The three material defaults assume the N - mm - t - s unit system
+        (alumina-like values), so the mesh must be in mm.
+    quadratic_tets : int, optional
+        0 (default): keep fTetWild's linear 4-node tets (C3D4).
+        1: convert every element to 10-node quadratic tets (C3D10).
     extra_args : dict, optional
         Additional key=value arguments forwarded verbatim to the Abaqus
         script on the command line, on top of the material properties that
@@ -76,17 +95,22 @@ def create_simulation(input_path:str,
     RETURNS
     -------
     success : bool
-        True if the inp file was created successfully, False otherwise
-        (also writes output files to disk).
+        True if the script reported "Simulation created successfully".
+        False if the mesh file or the script is missing, if the script
+        reported "Simulation creation FAILED", or if max_wait_time ran out.
+
+    RAISES
+    ------
+    subprocess.CalledProcessError
+        If the abaqus command itself exits with an error.
 
     NOTES
     -----
-    - The Python script used to create the simulation must be located in
-      output_path.
-    - Behavior: runs Abaqus in noGUI mode to execute the chosen script in that
-      folder, then waits for the external script to write a log file
-      'generate_sim_logger.txt' and polls that file until a
-      'Simulation created successfully' message is found in its last line.
+    - Any previous generate_sim_logger_<output_name>.txt is deleted before
+      the run: the scripts append to it, so an old success line would
+      otherwise be read as this run's result.
+    - The log is polled every 1-5 s; only its last non-empty line is read.
+    - On success, abaqus.rpy is deleted from output_path.
     """
     # the tetrahedral mesh the Abaqus script will load - checked here so a wrong
     # path fails immediately instead of after the max_wait_time polling below

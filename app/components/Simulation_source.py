@@ -2,7 +2,16 @@
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
 
-"""Renders the live status/log of an app.jobs.Job."""
+"""
+Back-end functions of the Simulation page (app/pages/4_Simulation.py):
+STL -> tetrahedral mesh (fTetWild) -> ABAQUS input file -> ABAQUS solve.
+
+The three *_job functions are long-running. The page runs them in a
+background thread with app.components.jobs.start_job(), which passes them a
+`log` callable as first argument; whatever they log is shown live on the page
+by app.components.jobs.render_job_status(). render_load_case_form() is a plain
+Streamlit form for the static load case.
+"""
 import streamlit as st
 import time
 from pathlib import Path
@@ -15,7 +24,11 @@ from app.components.jobs import Job
 """
 #=====================================================================================================================
 0 - (reserved)
-1 - render_job_status
+1 - mesh_job                     (fTetWild: STL -> tet mesh .inp)
+2 - create_abaqus_job            (pybaqus script: tet mesh -> Job-<name>.inp)
+3a - _clear_previous_job_files   (helper of run_abaqus_job)
+3 - run_abaqus_job               (ABAQUS solve)
+4 - render_load_case_form        (Streamlit form -> extra_args of create_simulation)
 #=====================================================================================================================
 """
 
@@ -32,14 +45,23 @@ def mesh_job(log: Callable[[str], None],
                 edge_length: float,
                 CPU_cores: int):
     """
-    Runs fTetWild meshing in a background thread and stores its live status/log in st.session_state.
-    
+    ============================================================================
+    1) MESH_JOB
+    Meshes an STL into a tetrahedral mesh with fTetWild
+    (TET_mesh_tools.mesh_an_STL), reading <stl_dir>/<file_name>.stl and
+    writing <stl_dir>/<mesh_output_name>.inp.
+    Runs synchronously: the Simulation page runs it in a background thread
+    through app.components.jobs.start_job(), which passes `log` and turns an
+    exception into a job with status "error".
+    ============================================================================
+
     PARAMETERS
     ----------
     log : callable
         Function to call with progress messages (e.g. `log("message")`).
+        Passed automatically by start_job.
     stl_dir : str
-        Directory containing the STL file to mesh.
+        Directory containing the STL file to mesh; the mesh is written there too.
     file_name : str
         Name of the STL file (without extension) to mesh.
     mesh_output_name : str
@@ -48,16 +70,22 @@ def mesh_job(log: Callable[[str], None],
     ftetwild_path : str
         Path to the fTetWild executable.
     epsilon : float
-        Envelope size for meshing.
+        Envelope size, relative to the bounding-box diagonal (fTetWild --epsr).
     edge_length : float
-        Target edge length for the tetrahedral mesh (relative to the object's bounding box).
-    cpu_cores : int
-        Number of CPU cores to use for meshing.
+        Target edge length, relative to the bounding-box diagonal
+        (fTetWild --lr).
+    CPU_cores : int
+        Number of CPU cores to use for meshing (fTetWild --max-threads).
+
     RETURNS
     -------
     bool
-        True if meshing was successful, False otherwise.          
-    
+        Always True: reaching the end means fTetWild finished without error.
+
+    RAISES
+    ------
+    subprocess.CalledProcessError
+        If fTetWild exits with an error (raised by mesh_an_STL).
     """
     log(f"Meshing {file_name}.stl with fTetWild (this can take a while)...")
     TET_mesh_tools.mesh_an_STL(
@@ -90,48 +118,57 @@ def create_abaqus_job(log: Callable[[str], None],
                 quadratic_tets: int = 0,
                 extra_args: Optional[dict] = None):
     """
-    Create an ABAQUS simulation input file (Job-<output_name>.inp) from an
-    existing tetrahedral mesh by running the selected noGUI generator script.
+    ============================================================================
+    2) CREATE_ABAQUS_JOB
+    Creates an ABAQUS simulation input file (Job-<output_name>.inp) from an
+    existing tetrahedral mesh, by running the selected pybaqus script headless
+    (abaqus_tools.create_simulation). Logs the load case before, and a hint
+    on where to look if it fails.
+    ============================================================================
 
     PARAMETERS
     ----------
     log : Callable[[str], None]
-        Callback used to emit status/progress messages.
+        Function to call with progress messages. Passed automatically by
+        app.components.jobs.start_job.
     mesh_dir : str
         Folder containing the tetrahedral mesh <mesh_name>.inp.
     mesh_name : str
         Name of the mesh file without the .inp extension.
     output_name : str
         Model/job name without the "Job-" prefix, e.g. "my_tpms-static". The
-        generator writes Job-<output_name>.inp and
+        script writes Job-<output_name>.inp and
         generate_sim_logger_<output_name>.txt.
     script_dir : str
-        Folder holding the copied generator script. Abaqus runs there, so the
+        Folder holding the copied pybaqus script. ABAQUS runs there, so the
         simulation files and logs are written into it.
     script_name : str
-        Name of the ABAQUS generator script to execute (for example static or frequency).
+        File name of the pybaqus script, WITH the .py extension, e.g.
+        "generate_static_sim.py" or "generate_frequency_sim.py".
     young_modulus : float
-        Material Young's modulus in the chosen unit system.
+        Young's modulus, in the unit system of the mesh (MPa for N-mm-t-s).
     poisson_ratio : float
-        Material Poisson's ratio.
+        Poisson's ratio.
     density : float
-        Material density in the chosen unit system.
+        Density, in the same unit system (t/mm^3 for N-mm-t-s).
     quadratic_tets : int, optional
-        Element order flag passed to the generator (typically 0=linear, 1=quadratic).
-    extra_args : dict | None, optional
-        Optional simulation-specific arguments forwarded as key=value on the
-        ABAQUS command line. Used mainly by static/stiffness cases
-        (for example axis, load, compression, tol_frac).
+        0 (default): linear 4-node tets (C3D4); 1: quadratic 10-node tets (C3D10).
+    extra_args : dict or None, optional
+        Simulation-specific key=value arguments forwarded on the ABAQUS
+        command line, e.g. from render_load_case_form() for the static case
+        (axis, load, compression, tol_frac). Default = None.
 
     RETURNS
     -------
     bool
-        True if the simulation input was generated successfully; False otherwise.
+        The result of abaqus_tools.create_simulation: True if the script
+        reported success, False otherwise (the reason is then usually in
+        generate_sim_logger_<output_name>.txt).
 
-    NOTES
-    -----
-    - Delegates execution to abaqus_tools.create_simulation().
-    - On failure, details are usually available in generate_sim_logger_<output_name>.txt.
+    RAISES
+    ------
+    subprocess.CalledProcessError
+        If the abaqus command itself exits with an error (from create_simulation).
     """
     log("Invoking ABAQUS (noGUI) to create the simulation input...")
     if extra_args:
@@ -164,15 +201,27 @@ def create_abaqus_job(log: Callable[[str], None],
 # =====================================================================
 def _clear_previous_job_files(run_dir: Path, file_name: str, log: Callable[[str], None]) -> bool:
     """
+    ============================================================================
+    3a) _CLEAR_PREVIOUS_JOB_FILES
     Deletes any leftover Job-<file_name>.* files (.odb, .sta, .msg, .lck,
-    .log, ...) from a previous run in `run_dir`.
-
+    .log, ...) from a previous run in run_dir.
     WHY: when those files are already present, ABAQUS itself prompts
     "Old job files exist. Overwrite? (y/n):" on stdin before it will start.
     abaqus_tools.run_simulation() launches it via subprocess.run() with no
     stdin attached, so that prompt just hangs forever instead of failing or
     proceeding. Clearing old outputs before each run means there's nothing
     left for ABAQUS to ask about.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    run_dir : Path or str
+        Folder where the ABAQUS job runs.
+    file_name : str
+        Job name without the "Job-" prefix.
+    log : Callable[[str], None]
+        Function to call with messages: which files were removed, and which
+        could not be.
 
     RETURNS
     -------
@@ -214,33 +263,40 @@ def run_abaqus_job(log: Callable[[str], None],
                 sim_dir: str,
                 max_wait_time: int = 600):
     """
+    ============================================================================
+    3) RUN_ABAQUS_JOB
     Runs the ABAQUS solve for a simulation input already created by
-    `create_abaqus_job`, then waits for it to complete.
-
-    `sim_dir` is the "{file_name}_sim" folder that already holds
-    Job-<file_name>.inp (written there by
-    create_simulation/generate_frequency_sim.py). abaqus_tools.run_simulation
-    copies that .inp from input_path to output_path before solving, so those
-    two can't be the same path (shutil.copyfile raises SameFileError on a
-    self-copy) - the actual solve therefore runs in a "run" subfolder of
-    sim_dir, and that subfolder is what ends up holding the .odb/log files.
+    create_abaqus_job, then waits for it to complete:
+        1) clears old Job-<file_name>.* files from <sim_dir>/run
+           (_clear_previous_job_files), returns False if some are locked
+        2) abaqus_tools.run_simulation: copies Job-<file_name>.inp from sim_dir
+           to <sim_dir>/run, starts the solve there, waits for it to start
+        3) abaqus_tools.wait_for_simulation_completed: waits for it to finish
+    The solve runs in the "run" subfolder because run_simulation copies the
+    .inp from input_path to output_path, and shutil.copyfile raises
+    SameFileError if those are the same folder. The .odb and log files
+    therefore end up in <sim_dir>/run.
+    ============================================================================
 
     PARAMETERS
     ----------
-    log : callable
-        Function to call with progress messages (e.g. `log("message")`).
+    log : Callable[[str], None]
+        Function to call with progress messages. Passed automatically by
+        app.components.jobs.start_job.
     file_name : str
-        Base name used to locate the input INP file and name the output files.
+        Job name without the "Job-" prefix: the input is Job-<file_name>.inp.
     sim_dir : str
         Folder holding Job-<file_name>.inp (written by create_abaqus_job).
     max_wait_time : int, optional
-        Max seconds to wait (applied separately to the "job started" wait
-        and the "job completed" wait). Default = 600.
+        Max seconds to wait, applied separately to the "job started" wait
+        and to the "job completed" wait. Default = 600.
 
     RETURNS
     -------
     bool
-        True if the simulation started AND completed successfully, False otherwise.
+        True if the job started AND completed successfully. False if old job
+        files could not be removed, if the job did not start, or if it did
+        not complete within max_wait_time.
     """
     sim_dir = Path(sim_dir)
     run_dir = sim_dir / "run"
@@ -275,12 +331,12 @@ def run_abaqus_job(log: Callable[[str], None],
 
 
 # =====================================================================
-# 3) render_load_case_form
+# 4) render_load_case_form
 # =====================================================================
 def render_load_case_form(key: str = "static") -> dict:
     """
     ============================================================================
-    1) RENDER_LOAD_CASE_FORM
+    4) RENDER_LOAD_CASE_FORM
     Draws the inputs that define the uniaxial load case and returns them in
     the shape create_simulation(extra_args=...) expects.
     ============================================================================

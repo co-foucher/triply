@@ -18,10 +18,12 @@ renamed: the PAGES list (Streamlit builds the sidebar from the filenames
 in app/pages/, it does not update this overview) and _PIPELINE_DOT, the
 file-flow diagram. Both are plain data at the top of the file.
 """
-# Repo root isn't on sys.path by default (app/ is a sibling of src/, not
-# part of the installable package) - add it before importing anything
-# under `app.*`. See app/_bootstrap.py for why this can't be a shared
-# import instead.
+# Repo root isn't on sys.path by default: `streamlit run app/Home.py` only
+# adds app/ itself, and app/ is not part of the installable triply package.
+# Add the repo root before importing anything under `app.*`. This can't be a
+# shared helper module: importing it would already need the repo root on
+# sys.path (chicken-and-egg), so every entry point inlines these lines, with
+# parents[N] = number of folders up to the repo root (1 here, 2 for pages).
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -112,7 +114,7 @@ PAGES = [
 ]
 
 # ---- File-flow diagram (rendered client-side by st.graphviz_chart) ----
-# Colors are the page palette re-used from 2_Simulation.py's FIELD_COLORS,
+# Colors are the page palette re-used from 4_Simulation.py's FIELD_COLORS,
 # with white label text on solid fills and mid-grey edges, so the graph
 # stays legible in both the light and the dark Streamlit theme without
 # needing to know which one is active. Grey nodes are not pages - they are
@@ -158,10 +160,22 @@ digraph coroforge {
 # ============================================================
 def _render_page_cards(row: int) -> None:
     """
+    ============================================================================
+    _RENDER_PAGE_CARDS
     Draws one row of page cards. st.columns(border=True) is what makes them
     cards: sibling columns share the row's height, so the borders line up
     without any injected CSS. One column per page in that row, so a row is
     never padded out with an empty bordered box.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    row : int
+        Which row to draw: the pages of PAGES whose "row" value equals it.
+
+    RETURNS
+    -------
+    None
     """
     pages = [p for p in PAGES if p["row"] == row]
     for col, page in zip(st.columns(len(pages), border=True, gap="medium"), pages):
@@ -264,7 +278,7 @@ period = 1.5 + 0.2 * distance_to_centre
 
 model = GyroidModel(x, y, z, px=period, py=period, pz=period,
                     thickness=thickness)
-model.compute_field()
+model.compute_density_field()
 model.generate_mesh()
 model.export_stl("graded_gyroid")
 ''',

@@ -1,21 +1,21 @@
 # triply: design, meshing, simulation and CT analysis of TPMS structures
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
-
 """
-2D slice viewer for a TPMS scalar field (model.v) - meant to sit above the
-3D mesh preview so the field can be sanity-checked before/alongside the
-extracted surface.
+2D slice viewer for any 3D scalar field on a regular grid - the implicit
+field, threshold / thickness fields, a field-generator result, a voxelized
+geometry or overhang labels - usually shown next to a 3D mesh preview so the
+field can be sanity-checked before/alongside the extracted surface.
 
-Delegates entirely to triply.viz.twod_view_of_matrix(show=False),
-which now returns the Plotly figure instead of always calling fig.show()
-(fig.show() pops open a separate browser tab/window, which isn't
-embeddable in a Streamlit page - see the `show` parameter added to that
-function). Reusing it wholesale, rather than rebuilding the heatmap here,
-keeps a single source of truth for what a field slice view looks like and
-gets the built-in Z-slice slider + Play/Pause animation for free (all
-client-side in the browser once rendered, no Streamlit rerun needed to
-scrub between slices).
+The user picks which axis is sliced (orientation selectbox); the field and
+its coordinate grids are permuted accordingly, then the figure is built by
+triply.viz.twod_view_of_matrix(show=False), which returns the Plotly figure
+instead of calling fig.show() (fig.show() pops open a separate browser
+tab/window, which isn't embeddable in a Streamlit page). Reusing it
+wholesale, rather than rebuilding the heatmap here, keeps a single source of
+truth for what a field slice view looks like and gets the built-in slice
+slider + Play/Pause animation for free (all client-side in the browser once
+rendered, no Streamlit rerun needed to scrub between slices).
 """
 from typing import Optional, Tuple
 
@@ -105,6 +105,9 @@ _ORIENTATION_PERMUTATIONS = {
 }
 
 
+# =====================================================================
+# 2) render_field_slice
+# =====================================================================
 def render_field_slice(v: np.ndarray,
                        x: np.ndarray,
                        y: np.ndarray,
@@ -124,7 +127,7 @@ def render_field_slice(v: np.ndarray,
     PARAMETERS
     ----------
     v : (Nx, Ny, Nz) ndarray or None
-        Scalar field, e.g. model.v after compute_field(). None shows a
+        Scalar field, e.g. model.v after compute_density_field(). None shows a
         placeholder instead.
     x, y, z : ndarray
         Coordinate grids matching v.shape (model.x/model.y/model.z).
@@ -133,7 +136,7 @@ def render_field_slice(v: np.ndarray,
         also used to key the orientation selectbox this function renders).
     value_range : (float, float), optional
         (zmin, zmax) for the colorscale. Pass the cached range computed
-        once right after compute_field() to avoid re-scanning the full
+        once right after compute_density_field() to avoid re-scanning the full
         (potentially huge) 3D array - twod_view_of_matrix falls back to
         min/max-of-v itself if not given.
 

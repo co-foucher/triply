@@ -46,9 +46,39 @@ def _build_load_figure(mesh_name: str,
                         tol_frac: float,
                         height: int = 600) :
     """
+    ============================================================================
+    2) _BUILD_LOAD_FIGURE
     Pure, cacheable half of render_load_preview(). Deliberately free of any
     st.* call - see mesh_preview._build_mesh_figure() for why the two halves
     are kept apart.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    mesh_name : str
+        Name of the mesh. Part of the cache key, unlike _faces / _verts /
+        _load (a leading "_" excludes an argument from st.cache_data's key),
+        so it is what tells two meshes apart in the cache.
+    _faces, _verts : ndarray
+        Mesh connectivity (M, 3) and vertex coordinates (N, 3).
+    axis : str
+        Load axis, "x", "y" or "z".
+    _load : float
+        Total load.
+    compression : bool
+        True: compression, False: tension.
+    tol_frac : float
+        Thickness of the end-face slabs, as a fraction of the mesh length
+        along axis (see select_end_faces).
+    height : int, optional
+        Figure height in pixels (default = 600).
+
+    RETURNS
+    -------
+    fig : plotly.graph_objects.Figure
+    rbm : (2, 3) ndarray
+        Positions of the two bottom nodes that block rigid-body motion
+        (pick_rbm_nodes).
     """
     fig, rmb = build_load_preview_figure(
         _faces, 
@@ -132,10 +162,30 @@ def render_load_preview(mesh_name: str,
 # =====================================================================
 def _sample_face_points(pts: np.ndarray, t1: int, t2: int, n_target: int = 48) -> np.ndarray:
     """
+    ============================================================================
+    4) _SAMPLE_FACE_POINTS
     gives a face's point cloud down to ~n_target points that are spread
     over the face instead of clustered wherever the STL happens to be
     finely tessellated.
     thank you AI for this function ><
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    pts : (N, 3) ndarray
+        Points of the face.
+    t1, t2 : int
+        Indices (0, 1, 2) of the two in-plane axes of the face.
+    n_target : int, optional
+        Approximate number of points to keep (default = 48).
+
+    RETURNS
+    -------
+    sampled_points : (n, 3) ndarray
+        All points if N <= n_target. Otherwise: the face is cut into an
+        n_side x n_side grid along t1 / t2, n_side = max(2, ceil(sqrt(n_target))),
+        and the first point found in each occupied grid cell is kept, so
+        n <= n_side^2 (49 for n_target = 48).
     """
     if len(pts) <= n_target:
         return pts
@@ -201,6 +251,9 @@ def build_load_preview_figure(faces: np.ndarray,
     RETURNS
     -------
     fig : plotly.graph_objects.Figure
+    rbm : (2, 3) ndarray
+        Positions of the two bottom nodes that block rigid-body motion
+        (pick_rbm_nodes).
 
     RAISES
     ------
@@ -209,7 +262,7 @@ def build_load_preview_figure(faces: np.ndarray,
     EXAMPLE
     -------
     >>> verts, faces = load_STL("block.stl")
-    >>> fig = build_load_preview_figure(faces, verts, axis="z", load=100.0)
+    >>> fig, rbm = build_load_preview_figure(faces, verts, axis="z", load=100.0)
     >>> st.plotly_chart(fig)
     """
     # ------ check input data ------

@@ -29,8 +29,15 @@ LOGO_ICON = str(ASSETS_DIR / "coroforge_icon.png")
 
 def render_sidebar_logo() -> None:
     """
+    ============================================================================
+    RENDER_SIDEBAR_LOGO
     Puts the coroforge logo at the top of the sidebar (and the square icon in
     the top-left corner when the sidebar is collapsed). Called from
     app.state.init_state(), so every page gets it without its own call.
+    ============================================================================
+
+    RETURNS
+    -------
+    None
     """
     st.logo(LOGO_SIDEBAR, size="large", icon_image=LOGO_ICON)

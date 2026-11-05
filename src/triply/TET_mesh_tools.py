@@ -1,19 +1,25 @@
 # triply: design, meshing, simulation and CT analysis of TPMS structures
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
-from pathlib import Path
-import meshio
-import subprocess
-from .logger import logger
-
 
 """
+============================================================================
+TET_MESH_TOOLS
+Tetrahedral meshing of STL files with fTetWild, and basic information about
+the resulting mesh.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - mesh_an_STL
 2 - get_mesh_info
 #=====================================================================================================================
 """
+
+from pathlib import Path
+import meshio
+import subprocess
+from .logger import logger
 
 
 # =====================================================================

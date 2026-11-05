@@ -1,17 +1,14 @@
 # triply: design, meshing, simulation and CT analysis of TPMS structures
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
-"""
-triply
-============
-
-just some low-level helpers
-"""
-
-from .config import DEFAULT_LINEAR_TOL, DEFAULT_ANGULAR_TOL_DEG
-from .logger import logger
 
 """
+============================================================================
+UTILS
+Low-level helpers: reload_all() for interactive development, help(),
+pad_to_square().
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - reload_all
@@ -20,6 +17,8 @@ from .logger import logger
 #=====================================================================================================================
 """
 
+from .config import DEFAULT_LINEAR_TOL, DEFAULT_ANGULAR_TOL_DEG
+from .logger import logger
 
 # =====================================================================
 # 1) reload_all

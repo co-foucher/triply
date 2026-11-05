@@ -2,15 +2,13 @@
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
 
-from typing import Optional
-import numpy as np
-from typing import Optional, Tuple, Union
-
-# Use relative imports so this module works when used as a package
-from .. import io_ops, mesh_tools, viz, adaptive_meshing
-from ..logger import logger
-
 """
+============================================================================
+TPMS_BASE
+TPMSModel, the base class shared by every TPMS type (field, mesh, export,
+checks), and the generic create_a_tpms() pipeline.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - TPMSModel (class)
@@ -21,8 +19,9 @@ from ..logger import logger
 4b - TPMSModel._implicit_field_at
 4c - TPMSModel.set_point_function
 4d - TPMSModel._value_at
-5 - TPMSModel.compute_field
+5 - TPMSModel.compute_density_field
 5b - TPMSModel.density_field_at
+5c - TPMSModel.compute_field (deprecated alias of compute_density_field)
 6 - TPMSModel.save
 7 - TPMSModel.load
 8 - TPMSModel.generate_mesh
@@ -84,26 +83,26 @@ the same equation:
         on the whole grid                at any points
         (regular meshing)                (adaptive meshing)
         -----------------                ------------------
-        compute_field(mode, level)       density_field_at(x, y, z, mode, level)
+        compute_density_field(mode, level)       density_field_at(x, y, z, mode, level)
              |                                  |
         _implicit_field()  ---calls--->  _implicit_field_at(x, y, z)
                                                 |
                                          the TPMS equation F
 
-compute_field() stores F and the density field in the object of the model
+compute_density_field() stores F and the density field in the object of the model
 (self.implicit_field, self.density_field); density_field_at() stores
 nothing and only returns the values at the points it was given.
 
 4. TWO WAYS TO MESH
 -------------------
 REGULAR (uniform grid):
-    model.compute_field(mode, level)   F and the density field on the whole grid
+    model.compute_density_field(mode, level)   F and the density field on the whole grid
     model.generate_mesh()              marching cubes on that grid
   Memory and time grow with the full grid, even far from the surface.
 
 ADAPTIVE (see adaptive_meshing.py):
     model.generate_mesh_adaptive(number_of_subdivisions, mode, level, ...)
-  No compute_field(): the field is never computed on the full grid, which is
+  No compute_density_field(): the field is never computed on the full grid, which is
   the whole point (it saves memory). The model's grid (x, y, z) is the COARSE
   grid: only the cells near the surface are refined, number_of_subdivisions
   times, so the final resolution is the grid spacing / 2**number_of_subdivisions.
@@ -134,7 +133,7 @@ So both paths (grid and any points) always use the same definition.
 --------------
     # REGULAR meshing: field and marching cubes on the whole grid
     model = GyroidModel(x, y, z, px=10, py=10, pz=10, thickness=0.5)
-    model.compute_field(mode="band")
+    model.compute_density_field(mode="band")
     model.generate_mesh(iso_level=0)
     model.export_stl("gyroid_regular.stl")
 
@@ -145,6 +144,14 @@ So both paths (grid and any points) always use the same definition.
     model.generate_mesh_adaptive(number_of_subdivisions=3, mode="band")
     model.export_stl("gyroid_adaptive.stl")
 """
+
+from typing import Optional
+import numpy as np
+from typing import Optional, Tuple, Union
+
+# Use relative imports so this module works when used as a package
+from .. import io_ops, mesh_tools, viz, adaptive_meshing
+from ..logger import logger
 
 # =====================================================================
 # 1) TPMSModel
@@ -175,7 +182,7 @@ class TPMSModel:
     - `_implicit_field(self) -> np.ndarray` : REQUIRED. Return the implicit
       surface function F(x, y, z) evaluated on self.x/self.y/self.z using
       self.px/self.py/self.pz. The zero-isosurface of F is the TPMS surface.
-    - `DEFAULT_FIELD_MODE` : class attribute used by compute_field() when no
+    - `DEFAULT_FIELD_MODE` : class attribute used by compute_density_field() when no
       `mode` is given (default "distance").
 
     NOTES
@@ -187,11 +194,11 @@ class TPMSModel:
     EXAMPLE
     -------
     >>> model = GyroidModel(x, y, z, px, py, pz, thickness)
-    >>> field = model.compute_field()
+    >>> field = model.compute_density_field()
     >>> model = GyroidModel.load("gyroid_data.npz")
     """
 
-    #: Default `mode` used by compute_field() when none is given. Subclasses
+    #: Default `mode` used by compute_density_field() when none is given. Subclasses
     #: may override this (e.g. a type whose natural default is "band" rather
     #: than "distance").
     DEFAULT_FIELD_MODE: str = "distance"
@@ -246,7 +253,7 @@ class TPMSModel:
 
         # --- optional data to the object ---
         self.implicit_field: Optional[np.ndarray] = None
-        # Scalar field (computed by compute_field)
+        # Scalar field (computed by compute_density_field)
         self.density_field: Optional[np.ndarray] = None
 
         # Mesh data (filled by generate_mesh)
@@ -324,7 +331,7 @@ class TPMSModel:
         Must be overridden by every concrete TPMS subclass. Returns the
         implicit surface function F(x, y, z) evaluated on self.x/self.y/self.z
         using the periods self.px/self.py/self.pz. The zero-isosurface of F
-        is this TPMS type's minimal surface; compute_field() turns F into a
+        is this TPMS type's minimal surface; compute_density_field() turns F into a
         thresholded scalar field ("band"/"signed"/"signed_inverse"/"distance" modes).
         ============================================================================
 
@@ -453,63 +460,66 @@ class TPMSModel:
         raise ValueError(f"{name} grid is not the same shape as x: {np.shape(value)} vs {np.shape(x)}. {name}")
     
     # =====================================================================
-    # 5) compute_field
+    # 5) compute_density_field
     # =====================================================================
-    def compute_field(self,
+    def compute_density_field(self,
                       mode: Optional[str] = None,
-                      level: Union[float, np.ndarray] = 0.0) -> np.ndarray:
+                      level: Union[float, np.ndarray] = 0.0,
+                      binary_output: bool = True) -> np.ndarray:
         """
         ============================================================================
-        5) COMPUTE_FIELD
-        Computes the TPMS scalar field from this subclass's implicit surface
-        (see _implicit_field).
+        5) COMPUTE_DENSITY_FIELD
+        Computes the binary density field (+1 solid, -1 empty) from this
+        subclass's implicit surface F (see _implicit_field). Stores
+        self.implicit_field and self.density_field, and returns the latter.
         ============================================================================
 
         PARAMETERS
         ----------
         mode : str, optional
+            With F = implicit_field, t = thickness, L = level (t and L read
+            with _value_at, so scalars, arrays or point functions):
             - None (default): uses this class's `DEFAULT_FIELD_MODE`.
-            - "band": two-sided shell -> density_field = thickness - |implicit_field|.
-              Solid wherever |implicit_field| < thickness: a wall of
-              controllable width straddling the implicit_field == 0 surface
-              (thickness is in implicit_field-value units, not physical
-              units). `level` is not used by this mode - the band is always
-              centered on implicit_field == 0.
-            - "signed": level-set network -> density_field = implicit_field - level.
-              Solid wherever implicit_field > level: one continuous
-              "skeletal" solid region on one side of the
-              implicit_field == level surface. `thickness` is not used by
-              this mode.
-            - "signed_inverse": the complement of "signed" ->
-              density_field = level - implicit_field. Solid wherever
-              implicit_field < level: the other side of the same
-              implicit_field == level surface. `thickness` is not used by
-              this mode.
-            - "distance" / "distance_fast": produce a signed-distance-derived
-              thickness field:
-                1) binary = implicit_field > level (this places the
-                   reference surface at implicit_field == level, instead of
-                   always at 0)
-                2) compute signed distance to that surface (uses spacing);
-                   "distance" uses the exact Euclidean transform,
-                   "distance_fast" uses a cheaper taxicab approximation
-                   (inaccurate for anisotropic voxel spacing).
-                3) v = physical_thickness/2 - |signed_dist| within the wall
-                   band around the implicit_field == level surface (positive
-                   inside the desired wall band); physical_thickness is
-                   `thickness`.
+            - "band": two-sided shell, solid where |F - L| <= t.
+              A wall straddling the F == L surface; t is in F-value units,
+              not physical units.
+            - "signed": solid where F >= L (one side of the F == L surface).
+              `thickness` is not used.
+            - "signed_inverse": solid where F <= L (the other side).
+              `thickness` is not used.
+            - "distance": wall of physical thickness t around the F == L
+              surface:
+                1) binary = F > L
+                2) d = Euclidean distance (scipy distance_transform_edt,
+                   sampling = voxel spacing) from each voxel to the nearest
+                   voxel of the other phase (unsigned, physical units)
+                3) solid where d < t / 2
+            - "distance_fast": same as "distance", but with a taxicab
+              distance (distance_transform_cdt) counted in VOXELS, not
+              physical units: t is then compared with voxel counts, so it
+              only matches "distance" when the voxel spacing is 1.
 
         level : float or np.ndarray, optional
-            Reference implicit_field value defining where the surface sits.
-            Used by "signed", "signed_inverse", and "distance"/"distance_fast".
-            Ignored by "band" (always centered on implicit_field == 0).
-            May be a scalar or an ndarray matching x/y/z's shape. Default 0.0.
+            Value L of F defining the reference surface F == L, used by
+            every mode. May be a scalar or an ndarray matching x/y/z's
+            shape. Default 0.0.
+        
+        binary_output : bool, optional
+            True (default): +1 where the solid is, -1 elsewhere.
+            False: the continuous field, positive in the solid: t - |F - L|, F - L,
+            L - F, or t/2 - distance for the distance modes.
 
         RETURNS
         -------
         density_field : np.ndarray
-            a field, equal to 1 where the solid should be and -1 outside.
+            Same shape as x; +1/-1 or continuous, see binary_output.
 
+        RAISES
+        ------
+        RuntimeError
+            If scipy is not available ("distance" / "distance_fast").
+        ValueError
+            If mode is not one of the five modes above.
         """
         if mode is None:
             mode = self.DEFAULT_FIELD_MODE
@@ -523,24 +533,27 @@ class TPMSModel:
             # thickness interpreted in implicit_field-value units (supports scalar or per-voxel thickness)
             logger.info(f"Computing band field")
             self.density_field = thickness - np.abs(self.implicit_field - level)
-            self.density_field[self.density_field < 0] = -1
-            self.density_field[self.density_field >= 0] = 1
+            if binary_output:
+                self.density_field[self.density_field < 0] = -1
+                self.density_field[self.density_field >= 0] = 1
             return self.density_field
 
         if mode == "signed":
             # level-set network relative to the provided level
             logger.info(f"Computing signed field (level={level})")
             self.density_field = self.implicit_field - level
-            self.density_field[self.density_field < 0] = -1
-            self.density_field[self.density_field >= 0] = 1
+            if binary_output:
+                self.density_field[self.density_field < 0] = -1
+                self.density_field[self.density_field >= 0] = 1
             return self.density_field
 
         if mode == "signed_inverse":
             # complement of "signed": solid on the other side of the same level surface
             logger.info(f"Computing signed_inverse field (level={level})")
             self.density_field = level - self.implicit_field
-            self.density_field[self.density_field < 0] = -1
-            self.density_field[self.density_field >= 0] = 1
+            if binary_output:
+                self.density_field[self.density_field < 0] = -1
+                self.density_field[self.density_field >= 0] = 1
             return self.density_field
 
         if mode in ("distance", "distance_fast"):
@@ -583,8 +596,11 @@ class TPMSModel:
             mask = dist < half_t
 
             # final field: positive inside the desired wall band, zero outside
-            self.density_field = np.zeros_like(dist) - 1
-            self.density_field[mask] = 1
+            if binary_output:
+                self.density_field = np.zeros_like(dist) - 1
+                self.density_field[mask] = 1
+            else:
+                self.density_field = half_t - dist
             #logger.info("Max: %s, Min: %s", self.density_field.max(), self.density_field.min())
             return self.density_field
 
@@ -603,7 +619,7 @@ class TPMSModel:
         """
         ============================================================================
         5b) DENSITY_FIELD_AT
-        Same density field as compute_field(), but evaluated at any given
+        Same density field as compute_density_field(), but evaluated at any given
         points instead of on the model's grid. Only the modes that need
         nothing but the point itself are available: "band", "signed" and
         "signed_inverse". Nothing is stored on the model.
@@ -614,10 +630,10 @@ class TPMSModel:
         x, y, z : np.ndarray
             Positions where the field is evaluated, any shape (all three the same).
         mode : str, optional
-            "band", "signed" or "signed_inverse" (see compute_field). None uses
+            "band", "signed" or "signed_inverse" (see compute_density_field). None uses
             this class's DEFAULT_FIELD_MODE, which must then be one of those three.
         level : float, optional
-            Reference implicit_field value, as in compute_field (default 0.0).
+            Reference implicit_field value, as in compute_density_field (default 0.0).
 
         RETURNS
         -------
@@ -635,7 +651,7 @@ class TPMSModel:
         thickness = self._value_at("thickness", self.thickness, x, y, z)
         level = self._value_at("level", level, x, y, z)
 
-        # Same formulas as compute_field()
+        # Same formulas as compute_density_field()
         if mode == "band":
             return thickness - np.abs(implicit_field - level)
         if mode == "signed":
@@ -646,6 +662,24 @@ class TPMSModel:
         raise ValueError(f"density_field_at supports 'band', 'signed' and 'signed_inverse'; "
                          f"mode {mode!r} needs the whole grid.")
 
+
+    # =====================================================================
+    # 5c) compute_field (deprecated alias)
+    # =====================================================================
+    def compute_field(self,
+                      mode: Optional[str] = None,
+                      level: Union[float, np.ndarray] = 0.0) -> np.ndarray:
+        """
+        ============================================================================
+        5c) COMPUTE_FIELD
+        Deprecated alias of compute_density_field(), kept so that existing
+        scripts and notebooks keep working. Logs a warning, then calls
+        compute_density_field(mode, level) and returns its result.
+        Will be removed in the next major version (5.0).
+        ============================================================================
+        """
+        logger.warning("compute_field() is deprecated, use compute_density_field() instead.")
+        return self.compute_density_field(mode=mode, level=level)
 
     # =====================================================================
     # 6) save
@@ -668,7 +702,7 @@ class TPMSModel:
         None
         """
         if self.density_field is None:
-            raise RuntimeError("Field has not been computed yet (call compute_field).")
+            raise RuntimeError("Field has not been computed yet (call compute_density_field).")
 
         io_ops.save_gyroid_matrices(
             outfile,
@@ -753,7 +787,7 @@ class TPMSModel:
             The generated vertices and faces (also stored on self).
         """
         if self.density_field is None:
-            logger.error("Field has not been computed yet. Call compute_field() before generate_mesh().")
+            logger.error("Field has not been computed yet. Call compute_density_field() before generate_mesh().")
             return None, None
 
         self.verts, self.faces = mesh_tools.mesh_from_matrix(
@@ -842,25 +876,35 @@ class TPMSModel:
         """
         ============================================================================
         9) SIMPLIFY_MESH
-        Simplifies and cleans the current mesh, returning (verts, faces).
-        Uses the mesh_tools simplification and connected-component filtering
-        helpers.
+        Simplifies the current mesh with mesh_tools.simplify_mesh, then keeps
+        only its largest connected component (mesh_tools.keep_largest_connected_component).
+        The result replaces self.verts / self.faces and is also returned.
         ============================================================================
 
         PARAMETERS
         ----------
         target_faces : float, optional
-                can be either the Desired final number of faces (default = 100000).
-                or the fraction of faces to keep (if between 0 and 1, e.g. 0.5 to keep 50% of faces).
+            If <= 1.0: fraction of faces to keep (e.g. 0.5 keeps 50%).
+            If > 1.0: number of faces to keep (default = 10000).
+            Removing the smaller connected components afterwards can leave
+            fewer faces than this target.
         mode : str, optional
-            "pyvista" (uses PyVista decimate_pro),
-            or "trimesh" (uses trimesh vertex clustering, default),
-            or "open3d" (uses Open3D quadric decimation).
+            Simplification backend, passed to mesh_tools.simplify_mesh:
+            "pyvista" (default, PyVista decimate_pro),
+            "trimesh" (trimesh vertex clustering) or
+            "open3d" (Open3D quadric decimation).
 
         RETURNS
         -------
         verts, faces : (np.ndarray, np.ndarray)
             The simplified vertices and faces (also stored on self).
+            None if no mesh has been generated yet (an error is logged,
+            nothing is raised).
+
+        RAISES
+        ------
+        Whatever mesh_tools.simplify_mesh raises (TypeError, ValueError,
+        RuntimeError; see there).
         """
         if self.verts is None or self.faces is None:
             logger.error("Mesh has not been generated yet.")
@@ -1003,7 +1047,7 @@ class TPMSModel:
         None
         """
         if self.density_field is None:
-            raise RuntimeError("Field not computed: call compute_field() before add_baseplates().")
+            raise RuntimeError("Field not computed: call compute_density_field() before add_baseplates().")
         if self.z is None:
             raise RuntimeError("Grid coordinates missing: self.z is required to compute baseplate thickness in z.")
 
@@ -1065,17 +1109,34 @@ class TPMSModel:
         """
         ============================================================================
         16) SMOOTH_MESH
-        Convenience wrapper to the mesh_tools.smooth_mesh function.
+        Smooths the current mesh in place with Taubin smoothing. By default
+        it calls mesh_tools.auto_smooth_mesh, which smooths in batches and
+        stops once the mesh roughness stops improving. With manual=True it
+        calls mesh_tools.smooth_mesh with a fixed number of iterations.
         ============================================================================
 
         PARAMETERS
         ----------
         smoothing_factor : float, optional
-            Taubin smoothing lambda parameter (default = 0.5).
+            Smoothing strength s, between 0 and 1 (default = 0.5): the
+            fraction of the highest-frequency noise removed per iteration.
+            Passed to mesh_tools.smooth_mesh / auto_smooth_mesh; see
+            mesh_tools.smooth_mesh for how lambda and mu are computed from it.
+        manual : bool, optional
+            If False (default), use auto_smooth_mesh (automatic stopping).
+            If True, run exactly manual_iterations iterations with smooth_mesh.
+        manual_iterations : int, optional
+            Number of Taubin iterations when manual=True (default = 10).
+            Ignored otherwise.
+        max_iterations : int, optional
+            Upper limit on the total iterations when manual=False
+            (default = 100). Ignored otherwise.
 
         RETURNS
         -------
         None
+            self.verts and self.faces are replaced by the smoothed mesh.
+
         """
         if self.verts is None or self.faces is None:
             raise RuntimeError("Mesh has not been generated yet.")
@@ -1138,7 +1199,7 @@ def create_a_tpms(model_cls,
         Target fraction of faces to keep during simplification (0.5 = keep
         50% of faces), or target number of faces if >1 (e.g. 10000). Default = 0.9.
     field_mode : str, optional
-        Field computation mode passed to compute_field(). Defaults to the
+        Field computation mode passed to compute_density_field(). Defaults to the
         model class's own DEFAULT_FIELD_MODE when not given.
 
     RETURNS
@@ -1147,7 +1208,7 @@ def create_a_tpms(model_cls,
         True if a valid mesh was generated and exported, False otherwise.
     """
     model_dist = model_cls(x, y, z, px, py, pz, t)
-    model_dist.compute_field(mode=field_mode)
+    model_dist.compute_density_field(mode=field_mode)
     if baseplate_thickness > 0.0:
         model_dist.add_baseplates(thickness=baseplate_thickness)
     #model_dist.save(save_path + ".npz")

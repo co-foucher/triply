@@ -264,90 +264,6 @@ def evaluate_equation(equation: str, x: np.ndarray, y: np.ndarray, z: np.ndarray
 
     return np.broadcast_to(np.asarray(result, dtype=float), np.asarray(x).shape).copy()
 
-
-
-
-'''
-# =====================================================================
-# 5) render_equation_input
-# =====================================================================
-def render_equation_input(key_prefix: str = "eq") -> Optional[str]:
-    """
-    ============================================================================
-    5) RENDER_EQUATION_INPUT
-    Renders the formula text box, validates it, and (if valid) shows a
-    cheap 2D mid-slice preview computed on a small grid - independent of
-    the full-resolution grid used for actual generation, so feedback is
-    near-instant even before clicking "Generate".
-    ============================================================================
-
-    PARAMETERS
-    ----------
-    key_prefix : str, optional
-        Prefix used to namespace this widget's Streamlit session_state
-        keys (default = "eq"), so multiple equation inputs can coexist
-        on the same page.
-
-    RETURNS
-    -------
-    equation, thickness : tuple[str, str], or None
-        The (equation, thickness) formula strings if both validated
-        successfully. None if either failed validation (the caller should
-        disable the Generate button while this is None).
-    """
-    st.caption("Variables: x, y, z, pi ")
-    st.caption("functions: sin, cos, tan, sinh, cosh, tanh, exp, log, sqrt, abs, max, min")
-
-    # =================================================
-    # ============ define implicit field ==============
-    # =================================================
-    equation = st.text_area(
-        "Implicit surface equation F(x, y, z)",
-        value=st.session_state.get(f"{key_prefix}_text", DEFAULT_EQUATION),
-        key=f"{key_prefix}_text",
-        height=80,
-    )
-    ok_eq, message = validate_equation(equation)
-    if not ok_eq:
-        st.error(message)
-        return None
-    st.success(message)
-
-    # =================================================
-    # =========== visualize implicit field ============
-    # =================================================
-
-    with st.expander("Preview of Field (mid z-slice, low-res, sample from -2 to 2)", expanded=False):
-        _, fn = parse_equation(equation)
-        n = 120
-        g = np.linspace(-2.0, 2.0, n)
-        gx, gy = np.meshgrid(g, g, indexing="ij")
-        gz = np.zeros_like(gx)
-        field = fn(gx, gy, gz)
-        field = np.broadcast_to(np.asarray(field, dtype=float), gx.shape)
-
-        fig = go.Figure(go.Heatmap(x=g, y=g, z=field.T, colorscale="Portland"))
-        fig.update_layout(height=350, margin=dict(l=0, r=0, t=20, b=0))
-        st.plotly_chart(fig, width="stretch")
-
-    # =================================================
-    # ======== define thickness of surface ============
-    # =================================================
-    thickness = st.text_area(
-        "Thickness",
-        value=st.session_state.get(f"{key_prefix}_thickness", "0.5 + 0.8 * x / max(abs(x))"),
-        key=f"{key_prefix}_thickness",
-        height=80,
-    )
-    ok_th, message = validate_equation(thickness)
-    if not ok_th:
-        st.error(message)
-        return None
-    st.success(message)
-
-    return equation, thickness
-'''
-
 # =====================================================================
 # 6) evaluate_custom_inputs
 # =====================================================================
@@ -397,7 +313,7 @@ def make_field_function(equation: str,
                                                               grid_z: np.ndarray) -> Callable:
     """
     ============================================================================
-    6b) make_field_function
+    6b) MAKE_FIELD_FUNCTION
     Turns an equation (text) into a Python function that gives the field at
     ANY points, with the same meaning as on the full grid.
 

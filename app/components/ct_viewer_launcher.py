@@ -5,7 +5,7 @@
 """
 Launches triply.CT_visualization_window's interactive viewer as a
 separate process for a given .mhd file already on disk. Shared by
-app/pages/3_CT_Analysis.py (loaded volume) and app/components/ct_pipeline.py
+app/pages/5_CT_Analysis.py (loaded volume) and app/components/ct_pipeline.py
 (processed mask preview) so the subprocess/backend-forcing logic and the
 full-vs-lightweight toggle only live in one place.
 
@@ -130,21 +130,9 @@ def CT_histogram(hist: np.ndarray, bin_edges: np.ndarray) -> None:
     """
     ============================================================================
     3) CT_HISTOGRAM
-    Renders a greyvalue histogram from an already-computed (hist,
-    bin_edges) pair - e.g. from app.pages.3_CT_Analysis._load_histogram,
-    which caches that computation separately, keyed on (mhd_path, bins)
-    rather than on the volume array itself (hashing a full CT volume on
-    every rerun would cost more than just recomputing the histogram - see
-    that function's docstring). Kept as a pure "given numbers, draw a
-    chart" function so the (cached) computation and the (cheap, always-
-    rerun) rendering stay decoupled, the same way _build_result_fig and
-    _run_pipeline are decoupled in ct_pipeline.py.
-
-    Renders via Plotly + st.plotly_chart, matching every other figure in
-    this app (see the Heatmap previews in 3_CT_Analysis.py/ct_pipeline.py/
-    equation_input.py) - a bare matplotlib plt.show(), which this used to
-    call, has nowhere to display to inside the Streamlit server process
-    and never reaches the browser at all.
+    Draws a greyvalue histogram (Plotly bar chart) from an already-computed
+    (hist, bin_edges) pair, with an "Ignore zeroes" toggle that hides the
+    bin containing greyvalue 0.
     ============================================================================
 
     PARAMETERS
@@ -209,22 +197,6 @@ def launch_ct_viewer_for_selection(mhd_path: str, selection_path: str) -> None:
     None
         Returns immediately: the viewer runs in its own process, and the
         app only notices the new file on its next rerun.
-
-    NOTES
-    -----
-    - Why a file: open_window does return the selected voxels, but in the
-      subprocess, so the Streamlit process never sees that return value.
-      The subprocess saves it instead.
-    - Written to "<name>.tmp.npz" first, then renamed (os.replace): the
-      app never reads a half-written file.
-    - If the window is closed with no voxel selected, nothing is written,
-      so a previous selection is not wiped by just opening and closing
-      the viewer. Each saved selection REPLACES the previous one (the
-      viewer always starts with nothing selected).
-    - Same matplotlib backend handling as launch_ct_viewer (QtAgg forced,
-      inherited MPLBACKEND removed) - see the comment there.
-    - `!r` writes each path as a quoted Python string literal, so Windows
-      backslashes and spaces in the paths survive inside the -c script.
     """
     env = os.environ.copy()
     env.pop("MPLBACKEND", None)

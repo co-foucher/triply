@@ -11,7 +11,7 @@ for a .mhd volume (the actual voxel data lives in a sibling .raw/.zraw file
 found via a relative path inside the .mhd header; uploading just the .mhd
 bytes leaves that reference dangling) or for a folder of JPG/DICOM/TIFF
 slices (there could be thousands of files). Since this app runs as a local
-Streamlit server on the user's own machine (see app/_bootstrap.py and the
+Streamlit server on the user's own machine (see docs/coroforge.md and the
 existing "Open interactive CT viewer" button, which already assumes a local
 display), popping a native OS dialog from the server process works fine -
 it appears on the same screen as the browser tab.
@@ -193,7 +193,7 @@ def browse_directory(key: str, title: str = "Select a folder") -> None:
     Unlike browse_file(), this does NOT render its own text_input - it's
     just the button. Pair it with a st.text_input(..., key=key) rendered
     alongside it, so the user can see the result and still edit/paste a
-    path by hand - see app/pages/3_CT_Analysis.py for the pattern.
+    path by hand - see app/pages/5_CT_Analysis.py for the pattern.
     ============================================================================
 
     PARAMETERS

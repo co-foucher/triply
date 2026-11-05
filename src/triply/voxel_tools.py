@@ -1,24 +1,31 @@
 # triply: design, meshing, simulation and CT analysis of TPMS structures
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
-import numpy as np
-from .logger import logger
-
-
 
 """
+============================================================================
+VOXEL_TOOLS
+Voxel-grid operations for 3D printing: overhang/bridge detection, support
+voxels, build-orientation search, resampling.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - detect_overhangs
 2 - _ray_distance
 3 - _detect_bridges
 4 - _get_rotation_matrix_from_new_z_direction
-5 - _REORIENT_VOXEL_GRID
+5 - _reorient_voxel_grid
 6 - find_optimal_orientation
 7 - interpolate_voxel_grid
 8 - field_to_function
 #=====================================================================================================================
 """
+
+import numpy as np
+from .logger import logger
+
+
 
 # =====================================================================
 # 1) detect_overhangs
@@ -34,11 +41,14 @@ def detect_overhangs(voxel_grid: np.ndarray,
     """
     ============================================================================
     1) DETECT_OVERHANGS
-    Detects overhang voxels in a 3D voxel grid by comparing each slice to the
-    previous one and flagging transitions whose implied angle exceeds a given
-    threshold. Overhang voxels that are actually bridged (supported on two
-    roughly opposite sides within the allowed bridging distance) are
-    reclassified as safe bridges rather than true overhangs.
+    Detects overhang voxels in a 3D voxel grid, slice by slice along +z
+    (slice 0 = build plate). For each voxel that becomes solid in slice i,
+    the angle from the vertical is alpha = arctan(d / dz), with d the
+    in-plane distance to the nearest solid voxel of slice i-1 and dz the
+    slice height; alpha > angle -> overhang. Overhang voxels supported on two
+    roughly opposite sides within the bridging distance are reclassified as
+    bridges. Overhang voxels are removed before the next slice, so they never
+    support what is above them. The input grid is not modified.
     ============================================================================
 
     PARAMETERS
@@ -47,36 +57,42 @@ def detect_overhangs(voxel_grid: np.ndarray,
         3D binary voxel grid, where each element is either 0 (empty) or
         1 (solid).
     x : (nx,) ndarray
-        1D or 3D array of voxel coordinates along x. Used to compute voxel size.
+        1D or 3D array of voxel coordinates along x (3D is cut to
+        x[:, 0, 0]). The in-plane spacing is taken as x[1] - x[0].
     y : (ny,) ndarray
-        1D or 3D array of voxel coordinates along y. Used to compute voxel size.
+        Same along y (3D is cut to y[0, :, 0]); spacing y[1] - y[0].
     z : (nz,) ndarray
-        1D or 3D array of voxel coordinates along z. Used to compute voxel size.
+        Same along z, the build direction (3D is cut to z[0, 0, :]); slice
+        height dz = z[1] - z[0].
     angle : float, optional
-        Overhang angle threshold in degrees (default = 45.0). Suspicious
-        voxels with an implied angle greater than this value are flagged as
-        overhangs.
+        Overhang angle threshold in degrees, measured from the vertical
+        (default = 45.0). Voxels with alpha > angle are flagged.
     bridge : float, optional
         Maximum bridgeable span, in the same physical units as x/y/z
-        (default = 10). An overhang voxel found to be supported on two
-        roughly opposite sides within this total span is reclassified as a
-        bridge instead of a true overhang.
+        (default = 10). An overhang voxel supported on two roughly opposite
+        sides within this total span is reclassified as a bridge.
+        0 disables bridge detection.
     n_bridge_angles : int, optional
         Number of ray directions (spanning 0-180 degrees, since each is
         tested in both the direction and its opposite) used to search for
         bridge support around each candidate voxel (default = 8, i.e. every
         22.5 degrees).
+    add_support_voxels : bool, optional
+        If True, every true overhang (not a bridge) with no solid voxel
+        anywhere below it gets a column of support voxels (label 4) down to
+        slice 0, and is itself relabelled 1 (supported). Overhangs above part
+        material are not supported and stay 2. Default = False.
 
     RETURNS
     -------
-    overhang_grid : (nx, ny, nz) ndarray
+    overhang_grid : (nx, ny, nz) uint8 ndarray
         Array of the same shape as voxel_grid, where each element is:
-            0 (not solid), 
-            1 (solid, not an overhang), 
-            2 (overhang), or
-            3 (bridge - unsupported but spanned between two supports within the
-                allowed bridging distance, safe to print without support).
-            4 (support voxel added to support an overhang above, if add_support_voxels=True).
+            0 (not solid),
+            1 (solid, not an overhang),
+            2 (overhang),
+            3 (bridge - unsupported but spanned between two supports within
+               the allowed bridging distance, safe to print without support),
+            4 (support voxel, only if add_support_voxels=True).
 
     RAISES
     ------
@@ -88,6 +104,7 @@ def detect_overhangs(voxel_grid: np.ndarray,
     EXAMPLE
     -------
     >>> overhang_grid = detect_overhangs(voxel_grid, x, y, z, angle=45.0)
+    >>> overhang_grid = detect_overhangs(voxel_grid, x, y, z, add_support_voxels=True)
     """
     if x.ndim != 1 or y.ndim != 1 or z.ndim != 1:
         logger.warning("x, y, and z are 3D arrays and will be cut to 1D.")
@@ -376,6 +393,50 @@ def _reorient_voxel_grid(voxel_grid: np.ndarray,
                          z: np.ndarray, 
                          rotation: np.ndarray,
                          grid_sample_factor: float = 1.0) :
+    """
+    ============================================================================
+    5) _REORIENT_VOXEL_GRID
+    Reorients a 3D binary voxel grid with a rotation matrix. The physical
+    coordinates of the solid voxels are rotated about the origin (p -> R @ p),
+    and the result is re-rasterized onto a new regular grid with cubic voxels
+    that fits their bounding box.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    voxel_grid : (nx, ny, nz) ndarray
+        Binary voxel grid; voxels equal to 1 are solid.
+    x, y, z : 1D ndarray
+        Evenly spaced voxel coordinates along each axis, of length nx, ny,
+        nz. The spacing is taken as x[1] - x[0] (same for y, z).
+    rotation : (3, 3) array_like
+        Rotation matrix R (proper rotation, det = +1 assumed, not checked).
+    grid_sample_factor : float, optional
+        If not 1.0, the grid is first resampled to int(n * factor) points
+        per axis (> 1 = finer grid, more voxels) with interpolate_voxel_grid.
+        Default = 1.0.
+
+    RETURNS
+    -------
+    new_grid : (nx', ny', nz') ndarray
+        Rotated grid, same dtype as voxel_grid, nearest-neighbour resampled
+        (0 outside the original grid). Voxel size h = (V_bbox / N)^(1/3),
+        with V_bbox the volume of the rotated solid voxels' bounding box and
+        N the number of voxels of the (resampled) input, so the output has
+        about as many voxels as the input.
+    new_x, new_y, new_z : 1D ndarray
+        Coordinates of the new grid, starting at the bounding box minimum,
+        step h.
+        If the input has no solid voxel: a (1, 1, 1) grid of zeros and
+        [0.0] for each axis.
+
+    RAISES
+    ------
+    ValueError
+        If voxel_grid is not 3D, rotation is not 3x3, or x/y/z lengths
+        don't match voxel_grid's shape.
+    """
+    
     # ===== check inputs =====
     if voxel_grid.ndim != 3:
         raise ValueError("voxel_grid must be a 3D numpy array")
@@ -468,13 +529,13 @@ def find_optimal_orientation(voxel_grid: np.ndarray,
     """
     ============================================================================
     6) FIND_OPTIMAL_ORIENTATION
-    Searches for the build orientation that minimizes overhangs. Candidate
-    build directions are sampled roughly evenly over the sphere (golden-angle
-    spiral, `n` directions). For each candidate, voxel_grid is reoriented so
-    that direction becomes the new +Z (build) axis via
-    _get_rotation_matrix_from_new_z_direction + _reorient_voxel_grid, then
-    scored with detect_overhangs. The orientation with the lowest score is
-    reoriented and re-classified once more and returned.
+    Searches for the build orientation that minimizes overhangs. n candidate
+    unit vectors d are sampled evenly over the sphere (golden-angle spiral).
+    For each, the rotation R with R @ e_z = d (from
+    _get_rotation_matrix_from_new_z_direction) is applied to the grid
+    (p -> R @ p, about the grid centre) with _reorient_voxel_grid, and the
+    result is scored with detect_overhangs. The best-scoring orientation is
+    reoriented and labelled once more, and returned.
     ============================================================================
 
     PARAMETERS
@@ -482,36 +543,47 @@ def find_optimal_orientation(voxel_grid: np.ndarray,
     voxel_grid : (nx, ny, nz) ndarray
         3D binary voxel grid (0 = empty, 1 = solid).
     x, y, z : 1D or 3D ndarray
-        Voxel coordinates along each axis (used to get the voxel pitch and
-        origin). Must be evenly spaced.
+        Voxel coordinates along each axis, evenly spaced. 3D grids are cut
+        to 1D (x[:, 0, 0], y[0, :, 0], z[0, 0, :]) with a warning. They are
+        shifted so that the grid centre is at (0, 0, 0) before rotating.
     n : int, optional
-        Number of candidate build directions to sample over the sphere
+        Number of candidate orientations sampled over the sphere
         (default = 20).
     overhang_angle : float, optional
-        Overhang angle threshold in degrees, passed through to
-        detect_overhangs as `angle` (default = 45).
+        Overhang angle threshold in degrees, passed to detect_overhangs as
+        `angle` (default = 45).
     bridge_size : float, optional
-        Maximum bridgeable span, passed through to detect_overhangs as
-        `bridge` (default = 10).
+        Maximum bridgeable span, in the units of x/y/z, passed to
+        detect_overhangs as `bridge` (default = 10).
     grid_sample_factor : float, optional
-        Factor to scale the voxel size when re-rasterizing the rotated grid
-        (default = 1.0).  A value > 1.0 will produce a large grid (less voxels).
+        Passed to _reorient_voxel_grid: the grid is resampled to
+        int(n_points * factor) points per axis before rotating
+        (> 1 = finer grid, more voxels, slower). Default = 1.0.
+    generate_supports : bool, optional
+        Passed to detect_overhangs as `add_support_voxels`: if True, the
+        returned grid also contains support voxels (label 4). Does not
+        change the score (default = False).
+    give_rotation_matrix : bool, optional
+        If True, also return the rotation matrix of the best orientation
+        (default = False).
 
     RETURNS
     -------
     overhang_grid : (nx', ny', nz') ndarray
-        The detect_overhangs output (0/1/2/3 labels, see detect_overhangs)
-        for the best-scoring orientation found, NOT the plain reoriented
-        solid grid.
+        The detect_overhangs labels for the best orientation (0 empty,
+        1 solid, 2 overhang, 3 bridge, 4 support if generate_supports),
+        NOT the plain reoriented solid grid.
     new_x, new_y, new_z : 1D ndarray
-        Coordinate arrays matching overhang_grid, for the reoriented (best)
-        orientation. The winning direction vector / rotation matrix itself
-        is not returned.
+        Coordinates of overhang_grid, in the frame centred on the original
+        grid's centre (see _reorient_voxel_grid).
+    rotation_matrix : (3, 3) ndarray
+        Only if give_rotation_matrix=True: the R applied to the best
+        orientation (points p of the centred grid -> R @ p).
 
-    NOTE
-    ----
-    Each candidate's score is np.sum(overhangs == 2) + np.sum(overhangs == 3),
-    i.e. true overhangs and bridges are weighted equally.
+    RAISES
+    ------
+    ValueError
+        If voxel_grid is not 3D, or x/y/z lengths don't match its shape.
     """
     # ===== check inputs =====
     if voxel_grid.ndim != 3:
@@ -571,7 +643,7 @@ def interpolate_voxel_grid(voxel_grid: np.ndarray,
     ============================================================================
     7) INTERPOLATE_VOXEL_GRID
     Resamples a 3D array -- a binary voxel grid, or a continuous scalar
-    field such as one produced by compute_field() -- onto a new grid of
+    field such as one produced by compute_density_field() -- onto a new grid of
     shape (x_dim, y_dim, z_dim), using trilinear interpolation (order=1).
     ============================================================================
 
@@ -619,12 +691,42 @@ def interpolate_voxel_grid(voxel_grid: np.ndarray,
 # =====================================================================
 # 8) field_to_function
 # =====================================================================
-def field_to_function(field, x, y, z, order=3):
+def field_to_function(field, x, y, z, order=1):
     """
-    Turns a field known only on a regular 'ij' meshgrid into a function f(x, y, z)
-    that can be evaluated anywhere, e.g. to pass to set_point_function().
-    order = 1: trilinear (exact for linear fields); order = 3: cubic B-spline (smooth gradients).
-    Outside the box, the value of the nearest face is used.
+    ============================================================================
+    8) FIELD_TO_FUNCTION
+    Turns a field known only on a regular 'ij' meshgrid into a function
+    f(x, y, z) that can be evaluated anywhere, e.g. to pass to
+    set_point_function().
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    field : (nx, ny, nz) ndarray
+        Field values at the grid points.
+    x, y, z : (nx, ny, nz) ndarray
+        Grid point positions (np.meshgrid(..., indexing="ij")), evenly spaced:
+        origin = (x[0,0,0], y[0,0,0], z[0,0,0]),
+        spacing = (x[1,0,0] - x[0,0,0], y[0,1,0] - y[0,0,0], z[0,0,1] - z[0,0,0]).
+    order : int, optional
+        Spline order, passed to scipy.ndimage.map_coordinates (default = 3).
+        1: trilinear (exact for linear fields, never overshoots).
+        3: cubic B-spline (smooth gradients); the coefficients are computed
+           once (spline_filter) so the spline passes through the samples.
+
+    RETURNS
+    -------
+    function : callable
+        function(points_x, points_y, points_z) -> values, all of the same
+        (any) shape. A point p is mapped to the fractional grid index
+        (p - origin) / spacing and interpolated there.
+
+    NOTES
+    -----
+    - Outside the grid, indices are clamped to its edge (mode="nearest"):
+      the value is the one at the nearest boundary of the grid.
+    - With order 3, values can overshoot slightly beyond [min(field),
+      max(field)] near sharp steps (e.g. a +1/-1 density field).
     """
     from scipy.ndimage import map_coordinates, spline_filter
     # position of the first grid point, and grid spacing along each axis

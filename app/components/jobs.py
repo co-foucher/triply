@@ -32,8 +32,26 @@ import streamlit as st
 @dataclass
 class Job:
     """
+    ============================================================================
+    1) JOB
     Represents a background job with a status, log, and result.
     has an `append_log` method for adding progress messages.
+    ============================================================================
+
+    FIELDS
+    ------
+    id : str
+        Unique id (uuid4), the key of this job in the jobs registry.
+    label : str
+        Human-readable label shown in the UI (e.g. "mesh:my_tpms").
+    status : str
+        "running" (default), "done" or "error".
+    log : list of str
+        One entry per progress message, added with append_log().
+    result : object
+        What the job's function returned (None until it is done).
+    error : str or None
+        Error message and traceback if the function raised, else None.
     """
     id: str
     label: str
@@ -46,7 +64,7 @@ class Job:
         self.log.append(line)
 
 # =====================================================================
-# 1) start_job
+# 2) start_job
 # =====================================================================
 def start_job(jobs: dict, 
                 label: str, 
@@ -54,7 +72,10 @@ def start_job(jobs: dict,
                 *args, 
                 **kwargs) -> str:
     """
+    ============================================================================
+    2) START_JOB
     Runs `fn(*args, log=job.append_log, **kwargs)` in a background thread.
+    ============================================================================
 
     PARAMETERS
     ----------
@@ -63,31 +84,35 @@ def start_job(jobs: dict,
     label : str
         Human-readable label shown in the UI (e.g. "mesh:my_tpms").
     fn : callable, i.e. a function
-        this function will be called in a background thread, 
+        this function will be called in a background thread,
         and it must accept a `log(str) -> None` keyword argument for progress messages.
-        (see app/pages/2_Simulation.py for examples).
+        (see app/pages/4_Simulation.py for examples).
     *args : positional arguments
         all the argurments that need to be passed to `fn`.
-        *args collects extra positional arguments — passed by position, no names, gathered into a tuple. 
+        *args collects extra positional arguments — passed by position, no names, gathered into a tuple.
     **kwargs : keyword arguments
         all the keyword arguments that need to be passed to `fn`.
         **kwargs collects extra keyword arguments — passed as name=value, gathered into a dict.
-    
-    NOTE:
-    -----
-    to undertand how *args and **kwargs work, consider the following example:
-
-    def f(*args, **kwargs):
-        print(args, kwargs)
-    
-    f(1, 2, x=3, y=4)
-    # args = (1, 2)
-    # kwargs = {'x': 3, 'y': 4}
 
     RETURNS
     -------
     job_id : str
-        Key into `jobs` for polling status (see components/job_log.py).
+        Key into `jobs` for polling status (see render_job_status below).
+
+    NOTES
+    -----
+    - If fn returns, job.result holds its return value and job.status becomes
+      "done". If fn raises, the exception is caught: job.status becomes
+      "error", job.error holds the message and traceback, and
+      "ERROR: <message>" is appended to job.log.
+    - to undertand how *args and **kwargs work, consider the following example:
+
+        def f(*args, **kwargs):
+            print(args, kwargs)
+
+        f(1, 2, x=3, y=4)
+        # args = (1, 2)
+        # kwargs = {'x': 3, 'y': 4}
     """
     # first create a Job object from the class defined above, with itsid defined by
     # a new UUID, and label defined by the label passed to the function. 
@@ -124,27 +149,9 @@ def render_job_status(jobs: dict, job_id_key: str) -> None:
     """
     ============================================================================
     1) RENDER_JOB_STATUS
-    Shows a job's current status and log tail. Auto-polls every 2s (via
-    st.fragment's run_every) so background-thread progress shows up without
-    the user having to click anything - cheap because only this small
-    fragment reruns, not the whole page. The "Refresh status" button is kept
-    as a manual/immediate option (scoped to the fragment too, so it doesn't
-    force a full-page rerun either).
-
-    Takes `job_id_key` (a session_state key, e.g. "abaqus_job_id") rather
-    than an already-resolved Job. The button that starts a job usually lives
-    in its OWN sibling fragment (see app/pages/2_Simulation.py -
-    render_create_abaqus_section / render_run_abaqus_section) - it sets
-    st.session_state[job_id_key] but, being a fragment-scoped rerun, does
-    NOT re-run this function's call site. If this function were handed an
-    already-resolved `job` object instead, that argument would stay frozen
-    at whatever it was on the last FULL page rerun (typically None, since
-    no job had started yet) - run_every would then keep re-rendering that
-    same stale None forever, never picking up the newly-started job. Doing
-    the `jobs.get(st.session_state.get(job_id_key))` lookup INSIDE this
-    fragment's own body instead means every rerun of THIS fragment (the
-    2s timer, or the Refresh button) re-reads current session_state, so it
-    always finds the live job once one exists.
+    Shows the status of a background job (running / done / failed) and the
+    last 200 lines of its log. Refreshes itself every 2 s (st.fragment
+    run_every); a "Refresh status" button refreshes it immediately.
     ============================================================================
 
     PARAMETERS

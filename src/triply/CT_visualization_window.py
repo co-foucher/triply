@@ -1,49 +1,52 @@
 # triply: design, meshing, simulation and CT analysis of TPMS structures
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
-import SimpleITK as sitk
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, Button
-from matplotlib import gridspec
-import time
-import numpy.ma as ma
-import logging
 
 """
-This script is intended to be used as you would a library. Import it as such:
+============================================================================
+CT_VISUALIZATION_WINDOW
+Interactive Matplotlib viewer for CT volumes (SimpleITK images): scroll
+through the slices, inspect grey values, select pixels with a brush, colour
+grey-value ranges (rainbow) and show the histogram.
+============================================================================
 
-    import sys
-    # Add the directory to the sys.path
-    sys.path.append('D:/COFO - HP/03 - Github/dvpt-at-EMPA/HappyBisons/image analysis')
-    # Now you can import modules from that directory
-    import tools.CT_visualization_window as CT_visualization_window
+USAGE
+-----
+In a notebook (an interactive Qt backend is required):
+
     %matplotlib qt
+    import SimpleITK as sitk
+    from triply.CT_visualization_window import open_window, lightweigth_open
 
-!!!! do not forget %matplotlib qt !!!!!
+    image = sitk.ReadImage("scan.mhd")
+    selected_pixels = open_window(image)   # full viewer, returns the selected (x, y, slice)
+    lightweigth_open(image)                # slice slider + click-to-inspect only
 
-You should be able to easily add more "action buttons" by adding more functions in this script.
+!!!! do not forget %matplotlib qt, otherwise the window is not interactive !!!!
+In a plain Python script, call matplotlib.use("QtAgg") before importing
+matplotlib.pyplot instead (this is what app/components/ct_viewer_launcher.py does).
 
+More "action buttons" can be added by writing a new action function and
+registering it in setup_buttons().
 
-it is structured as follow:
-
+STRUCTURE
+---------
 - setups:
-    - window: defined the figure, sliders..
-    - buttons: defines the action buttons, and which function they activate
-- (small) actions: list of small functions;
-    - rotate_view, next_slice, prev_slice, update_plot, reset_window, change_button_color, onscroll, greyvalue_at_coord, calculate_average, make_greyscale_inRGB
+    - setup_window: defines the figure and its axes
+    - setup_buttons: defines the action buttons, and which function each one calls
+    - setup_slider: defines the slice slider
+- (small) actions:
+    - rotate_view, next_slice, prev_slice, update_plot, reset_window,
+      change_button_color, onscroll, greyvalue_at_coord, calculate_average,
+      make_greyscale_inRGB
 - (big) actions:
-    - rainbow colors
-    - histogram
-    - on click
+    - rainbow colours: rainbow_colors, calculate_rainbow_masks, update_rainbow, apply_rainbow_all
+    - histogram: update_histogram
+    - on click: onclick
+- logger: configure_logger, the logger for errors and messages
+- main (the only functions meant to be called from outside):
+    open_window, lightweigth_open, check_existence
 
-- logger: defines the logger for storing errors and displaying messages
-- main: main functions that should be the only ones called a tools from the library
-
-
-"""
-
-"""
 #=====================================================================================================================
 0 - (reserved)
 1 - setup_window
@@ -72,6 +75,14 @@ it is structured as follow:
 #=====================================================================================================================
 """
 
+import SimpleITK as sitk
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider, Button
+from matplotlib import gridspec
+import time
+import numpy.ma as ma
+import logging
 
 # =======================================================================================================
 # ================================================== setups =============================================

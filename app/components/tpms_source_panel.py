@@ -16,7 +16,7 @@ from app.components.file_picker import browse_file
 from app.components.import_TPMS_files import import_matrix_from_file
 from app.components.equation_input import render_equation_input
 
-# ---- Field modes (label -> TPMSModel.compute_field(mode=...) argument) ----
+# ---- Field modes (label -> TPMSModel.compute_density_field(mode=...) argument) ----
 FIELD_MODES = {
     "Distance": "distance",
     "Signed": "signed",
@@ -60,6 +60,8 @@ SHEET_MODES = ("band", "distance")
 6 - generate_ui_tpms
 7 - pad_to_square
 8 - render_period_input
+9 - make_grid
+10 - conformal_coords   (helpers _arc_scale, documentation_cyl_and_sphere_systems)
 11 - _compute_kept_fraction
 12 - _build_smoothing_figure
 13 - render_smoothing_preview
@@ -472,9 +474,9 @@ def generate_ui_tpms(
 
             # ---- compute density_field ------
             if params.field_mode in SKELETAL_MODES:   # "signed", "signed_inverse"
-                model.compute_field(mode=params.field_mode, level=params.threshold)
+                model.compute_density_field(mode=params.field_mode, level=params.threshold)
             elif params.field_mode in SHEET_MODES:   # "band", "distance"
-                model.compute_field(mode=params.field_mode, level=params.threshold)
+                model.compute_density_field(mode=params.field_mode, level=params.threshold)
             else:
                 raise ValueError(f"Unknown field mode: {params.field_mode}")
 
@@ -721,12 +723,28 @@ def make_grid(size_x: float, size_y: float, size_z: float,
 # =====================================================================
 def _arc_scale(r_ref: float, period) -> float:
     """
+    ============================================================================
+    _ARC_SCALE
     Length L such that the arc coordinate L*angle wraps an INTEGER number N
     of periods around a full turn (angle 0 -> 2 pi), so there is no seam:
         N = max(1, round(2 pi r_ref / p)),   L = N p / (2 pi).
     At radius r_ref the cells are then ~p long along the circle. With no
     period (custom equation), L = r_ref, i.e. the plain arc length at r_ref.
     A per-voxel period array is replaced by its mean for this choice only.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    r_ref : float
+        Reference radius.
+    period : float, ndarray or None
+        Period p along the arc (an array is replaced by its mean); None for a
+        custom equation.
+
+    RETURNS
+    -------
+    L : float
+        N p / (2 pi), or r_ref if period is None.
     """
     if period is None:
         return r_ref

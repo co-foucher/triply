@@ -2,6 +2,30 @@
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
 
+"""
+============================================================================
+MESH_TOOLS
+Operations on triangle surface meshes (verts, faces): marching cubes,
+voxelization, simplification, smoothing, repair, checks, export.
+============================================================================
+
+#=====================================================================================================================
+0 - (reserved)
+1 - keep_largest_connected_component
+2 - simplify_mesh
+3 - calculate_triangle_areas
+4 - export_as_STL
+5 - mesh_from_matrix
+6 - check_mesh_validity
+7 - fix_mesh                       (helper _is_mesh_fixed)
+8 - smooth_mesh                    (helper _taubin_coefficients_from_strength)
+9 - matrix_from_mesh
+10 - _uniform_laplacian_roughness  (roughness metric used by auto_smooth_mesh)
+11 - auto_smooth_mesh
+12 - rotate_STL
+#=====================================================================================================================
+"""
+
 import numpy as np
 from collections import defaultdict
 import trimesh # type: ignore
@@ -12,23 +36,6 @@ from skimage import measure # type: ignore
 #import pyvista as pv # type: ignore
 
 
-
-"""
-#=====================================================================================================================
-0 - (reserved)
-1 - keep_largest_connected_component
-2 - simplify_mesh
-3 - calculate_triangle_areas
-4 - export_as_STL
-5 - mesh_from_matrix
-6 - check_mesh_validity
-7 - fix_mesh
-8 - smooth_mesh
-9 - matrix_from_mesh
-10 - _calculate_mesh_roughness
-11 - auto_smooth_mesh
-#=====================================================================================================================
-"""
 
 # =====================================================================
 # 1) keep_largest_connected_component
@@ -109,8 +116,10 @@ def simplify_mesh(verts: np.ndarray, faces: np.ndarray, target: float = 100000, 
     """
     ============================================================================
     2) SIMPLIFY_MESH
-    Iteratively decimates a mesh using trimesh vertex clustering until a target
-    number of faces is reached.
+    Reduces the number of faces of a mesh to a target, with one of three
+    backends: PyVista decimate_pro (default, one call), trimesh vertex
+    clustering or Open3D quadric decimation (both halve the face count per
+    step until the target is reached).
     ============================================================================
 
     PARAMETERS
@@ -120,12 +129,17 @@ def simplify_mesh(verts: np.ndarray, faces: np.ndarray, target: float = 100000, 
     faces : (M, 3) ndarray
         Triangular faces.
     target : float, optional
-        can be either the Desired final number of faces (default = 100000).
-        or the fraction of faces to keep (if between 0 and 1, e.g. 0.5 to keep 50% of faces).
+        If target <= 1.0: fraction of faces to keep (e.g. 0.5 keeps 50%,
+        1.0 keeps all). If target > 1.0: number of faces to keep
+        (default = 100000).
     mode : str, optional
-        "pyvista" (uses PyVista decimate_pro),
-        or "trimesh" (uses trimesh vertex clustering, default),
-        or "open3d" (uses Open3D quadric decimation).
+        "pyvista" (default): PyVista decimate_pro with reduction
+            (M - target_faces) / M; the final face count is approximate.
+        "trimesh": trimesh vertex clustering, halving the face count per
+            step. If a step fails, the error is logged and the mesh reached
+            so far is returned.
+        "open3d": Open3D quadric decimation, halving the face count per
+            step. If a step fails, RuntimeError is raised.
 
     RETURNS
     -------
@@ -134,11 +148,14 @@ def simplify_mesh(verts: np.ndarray, faces: np.ndarray, target: float = 100000, 
     faces_simplified : (T, 3) ndarray
         Simplified faces.
 
-    NOTES
-    -----
-    - Parameter and return order both follow the (verts, faces) convention
-      used throughout mesh_tools.py (e.g. mesh_from_matrix,
-      keep_largest_connected_component).
+    RAISES
+    ------
+    TypeError
+        If verts or faces is None, or if the mesh has zero faces.
+    ValueError
+        If mode is not "pyvista", "trimesh" or "open3d".
+    RuntimeError
+        If an Open3D simplification step fails (mode="open3d").
 
     EXAMPLE
     -------
@@ -232,13 +249,13 @@ def simplify_mesh(verts: np.ndarray, faces: np.ndarray, target: float = 100000, 
         logger.error(f"Invalid simplification mode: {mode}. Returning original mesh.")
         raise ValueError("Invalid simplification mode.")
 
-#=====================================================================
-#3) TRIANGLE_AREAS
-#=====================================================================
+# =====================================================================
+# 3) calculate_triangle_areas
+# =====================================================================
 def calculate_triangle_areas(verts: np.ndarray, faces: np.ndarray) -> np.ndarray:
     """
     ============================================================================
-    3) TRIANGLE_AREAS
+    3) CALCULATE_TRIANGLE_AREAS
     Computes area for every triangular face in a mesh.
     ============================================================================
 
@@ -291,9 +308,9 @@ def calculate_triangle_areas(verts: np.ndarray, faces: np.ndarray) -> np.ndarray
 
 
 
-#=====================================================================
-#4) export_as_STL
-#=====================================================================
+# =====================================================================
+# 4) export_as_STL
+# =====================================================================
 def export_as_STL(verts: np.ndarray, faces: np.ndarray, path: str):
     """
     ============================================================================
@@ -357,9 +374,9 @@ def export_as_STL(verts: np.ndarray, faces: np.ndarray, path: str):
 
 
 
-#=====================================================================
-#5) mesh_from_matrix
-#=====================================================================
+# =====================================================================
+# 5) mesh_from_matrix
+# =====================================================================
 def mesh_from_matrix(
     matrix: np.ndarray,
     iso_level: float,
@@ -374,37 +391,52 @@ def mesh_from_matrix(
     ============================================================================
     5) MESH_FROM_MATRIX
     Extracts an isosurface mesh (verts, faces) from a 3D scalar field using
-    marching cubes. Optionally pads the volume with a constant value to help
-    close surfaces touching the boundary).
+    marching cubes (scikit-image, Lewiner method). The volume is first padded
+    with a constant value so that surfaces touching the boundary get closed
+    "caps". Vertices are returned in the physical coordinates of the
+    un-padded grid.
     ============================================================================
 
     PARAMETERS
     ----------
     matrix : (nx, ny, nz) ndarray
-        Scalar field values sampled on a regular grid.
+        Scalar field values sampled on a regular grid. Converted to float.
     iso_level : float
-        Isosurface level (marching cubes "level").
-    spacing : tuple(float, float, float)
-        Voxel spacing (dx, dy, dz) in physical units.
+        Isosurface level (marching cubes "level"). Must lie within the
+        range of matrix values.
     algo_step_size : int
-        Marching cubes step size (larger = faster, less detail), passed straight
-        to skimage.measure.marching_cubes.
-    x, y, z : float, optional
-        Physical coordinate of voxel (0,0,0) in the *un-padded* matrix.
+        Marching cubes step size (larger = faster, less detail), passed
+        straight to skimage.measure.marching_cubes.
+    x, y, z : (nx, ny, nz) ndarray, or 1D ndarray
+        Coordinates of every voxel, as 3D grids indexed like matrix
+        (np.meshgrid(..., indexing="ij")). 1D arrays of length nx, ny, nz
+        are also accepted and converted to such grids (a warning is logged).
+        Must be evenly spaced and increasing: the voxel spacing is taken as
+        |x[1,0,0] - x[0,0,0]| (same for y, z) and the origin as
+        (x[0,0,0], y[0,0,0], z[0,0,0]).
     pad_width : int, optional
-        Number of voxels to pad on each face of the volume.
-    pad_val : float or None, optional
-        Constant padding value. If None, automatically chosen to be safely above
-        iso_level relative to the data range (encourages "caps" on boundaries).
-        If your "solid" is on the other side of the iso_level, you may want to
-        pass a value safely below iso_level instead.
+        Number of voxel layers padded on each face of the volume
+        (default = 5).
+    pad_val : float, optional
+        Constant value of the padding (default = -1). It must be on the
+        empty side of iso_level for the caps to close: with the solid where
+        matrix > iso_level (TPMS density fields), use a value below
+        iso_level. None is not supported.
 
     RETURNS
     -------
     verts : (N, 3) ndarray
-        Vertex coordinates in physical units.
+        Vertex coordinates in physical units, in the frame of x, y, z.
     faces : (M, 3) ndarray
         Triangle connectivity (indices into verts).
+
+    RAISES
+    ------
+    ValueError
+        If x, y, z are 1D but their lengths don't match matrix's shape.
+    RuntimeError
+        If padding, marching cubes (e.g. iso_level outside the data range)
+        or the vertex translation fails.
     """
     logger.info("Extracting isosurface mesh from matrix.")
 
@@ -481,9 +513,9 @@ def mesh_from_matrix(
 
 
 
-#=====================================================================
-#6) check_mesh_validity
-#=====================================================================
+# =====================================================================
+# 6) check_mesh_validity
+# =====================================================================
 def check_mesh_validity(verts: np.ndarray, faces: np.ndarray) -> dict:
     """
     ============================================================================
@@ -537,13 +569,13 @@ def check_mesh_validity(verts: np.ndarray, faces: np.ndarray) -> dict:
     return info
 
 
-#=====================================================================
-#7) fix_mesh
-#=====================================================================
+# =====================================================================
+# 7) fix_mesh
+# =====================================================================
 def fix_mesh(verts: np.ndarray, faces: np.ndarray):
     """
     ============================================================================
-    7) fix_mesh
+    7) FIX_MESH
     Attempts to fix common mesh issues (non-manifold edges, inconsistent normals)
     ============================================================================
     
@@ -614,9 +646,9 @@ def _is_mesh_fixed(verts: np.ndarray, faces: np.ndarray) -> bool:
 
 
 
-#=====================================================================
-#8) smooth_mesh
-#=====================================================================
+# =====================================================================
+# 8) smooth_mesh
+# =====================================================================
 
 def _taubin_coefficients_from_strength(strength: float,
                                       passband_frequency: float = 0.1,
@@ -643,10 +675,13 @@ def _taubin_coefficients_from_strength(strength: float,
     mu_factor = lambda_factor / (passband_frequency * lambda_factor - 1.0)
     return lambda_factor, mu_factor
 
-def smooth_mesh(verts: np.ndarray, faces: np.ndarray, smoothing_factor:float=0.1, iterations:int=10):
+def smooth_mesh(verts: np.ndarray, 
+                faces: np.ndarray, 
+                smoothing_factor:float=0.1, 
+                iterations:int=1):
     """
     ============================================================================
-    8) smooth_mesh
+    8) SMOOTH_MESH
     Performs Taubin smoothing on the mesh using Open3D's filter_smooth_taubin.
     Taubin smoothing is volume-preserving (avoids the mesh shrinkage of plain
     Laplacian smoothing) by alternating a positive and negative Laplacian step.
@@ -659,14 +694,16 @@ def smooth_mesh(verts: np.ndarray, faces: np.ndarray, smoothing_factor:float=0.1
     faces : (M, 3) ndarray
         Triangle face connectivity.
     smoothing_factor : float, optional
-        Lambda (λ) parameter — positive Laplacian step size (default = 0.1).
-        Larger values pull vertices more strongly toward the local neighborhood
-        average each iteration. Note: mu (μ) is fixed internally at Open3D's
-        default (-0.53). Taubin's filter only stays stable / non-shrinking when
-        0 < λ < |μ|, so values approaching or exceeding ~0.53 can cause
-        instability or distortion rather than stronger smoothing.
+        Smoothing strength s, between 0 and 1 (default = 0.1). It is the
+        fraction of the highest-frequency noise removed per iteration
+        (s = 0: no smoothing; s = 1: Open3D's default lambda = 0.5,
+        mu = -0.526). It is not lambda itself: lambda and mu are both
+        computed from s by _taubin_coefficients_from_strength, with the
+        passband frequency 0.1 kept unchanged (shape preserved), so every
+        value in [0, 1] stays stable and non-shrinking.
+        Raises ValueError if s is outside [0, 1].
     iterations : int, optional
-        Number of Taubin iterations (default = 10).
+        Number of Taubin iterations (default = 1).
 
     RETURNS
     -------
@@ -785,13 +822,13 @@ def matrix_from_mesh(verts: np.ndarray,
     return x, y, z, np.array(matrix.matrix).astype(np.uint8)
 
 
-#=====================================================================
-# 10) auto_smooth_mesh helper: mesh roughness metric
-#=====================================================================
+# =====================================================================
+# 10) _uniform_laplacian_roughness (roughness metric used by auto_smooth_mesh)
+# =====================================================================
 def _uniform_laplacian_roughness(verts: np.ndarray, faces: np.ndarray) -> float:
     """
     ============================================================================
-    _UNIFORM_LAPLACIAN_ROUGHNESS
+    10) _UNIFORM_LAPLACIAN_ROUGHNESS
     Scalar "how bumpy is this mesh" proxy used by auto_smooth_mesh to decide
     when smoothing has converged. 
     AI SLOPE
@@ -832,9 +869,9 @@ def _uniform_laplacian_roughness(verts: np.ndarray, faces: np.ndarray) -> float:
     return float(np.mean(np.linalg.norm(laplacian, axis=1)))
 
 
-#=====================================================================
+# =====================================================================
 # 11) auto_smooth_mesh
-#=====================================================================
+# =====================================================================
 def auto_smooth_mesh(
     verts: np.ndarray,
     faces: np.ndarray,
@@ -845,10 +882,13 @@ def auto_smooth_mesh(
     max_displacement: float = None):
     """
     ============================================================================
-    AUTO_SMOOTH_MESH
-    Runs smooth_mesh() (Taubin smoothing) in small batches and automatically
-    stops once a mesh-roughness metric plateaus, instead of requiring a
-    hand-picked `iterations` value.
+    11) AUTO_SMOOTH_MESH
+    Runs smooth_mesh() (Taubin smoothing) in batches of batch_iterations
+    iterations, and stops once the mesh roughness stops improving, instead of
+    requiring a hand-picked `iterations` value.
+    Roughness R = mean over vertices of ||v_i - mean(neighbours of v_i)||
+    (see _uniform_laplacian_roughness). After each batch, the relative
+    improvement (R_previous - R) / R_previous is checked.
     ============================================================================
     PARAMETERS
     ----------
@@ -857,48 +897,49 @@ def auto_smooth_mesh(
     faces : (M, 3) ndarray
         Triangular face connectivity.
     smoothing_factor : float, optional
-        Taubin lambda, passed straight through to smooth_mesh (default =
-        0.9). Note: within Open3D's stable range (0 < lambda < 0.53, since
-        mu is fixed at -0.53) the exact value matters far less than the
-        number of iterations does, so it is left as a fixed, safe default
-        rather than auto-tuned here.
+        Smoothing strength s, between 0 and 1 (default = 0.9), passed
+        straight to smooth_mesh (see there for how lambda and mu are
+        computed from it).
     batch_iterations : int, optional
-        Number of Taubin iterations run per convergence-check batch
-        (default = 2). Smaller -> finer-grained stopping decisions;
-        larger -> fewer, cheaper roughness evaluations.
+        Number of Taubin iterations per batch, i.e. between two roughness
+        checks (default = 2). Smaller -> finer-grained stopping decisions;
+        larger -> fewer roughness evaluations.
     max_iterations : int, optional
-        Hard cap on total iterations, in case roughness never plateaus
-        (default = 100).
+        Maximum number of BATCHES (default = 100), so at most
+        max_iterations * batch_iterations Taubin iterations in total.
     improvement_tol : float, optional
-        Stop once the relative roughness improvement between batches drops
-        below this fraction (default = 0.02, i.e. < 2%).
+        Stop once the relative roughness improvement of a batch drops
+        below this fraction (default = 0.005, i.e. < 0.5%).
     max_displacement : float, optional
-        If given, an absolute cap on mean per-vertex displacement from the
-        original mesh. Smoothing stops as soon as the next batch would
-        exceed it, even if roughness hasn't plateaued yet. Default = None
-        (no cap).
+        Upper limit on the mean distance between each vertex and its
+        position in the input mesh. A batch that would exceed it is
+        discarded and smoothing stops. Default = None (no limit).
+
+    STOPPING CONDITIONS (checked after each batch, in this order)
+    -------------------
+    - mean displacement > max_displacement -> batch discarded, stop
+    - roughness == 0                       -> batch kept, stop
+    - roughness increased                  -> batch kept, stop
+    - improvement < improvement_tol        -> batch kept, stop
+    - max_iterations batches reached       -> stop (a warning is logged)
 
     RETURNS
     -------
     verts_smoothed : (N, 3) ndarray
         Smoothed vertex coordinates.
     faces : (M, 3) ndarray
-        Unchanged triangle face connectivity.
-    info : dict
-        Diagnostics, keyed by:
-            "iterations"       : total Taubin iterations actually applied.
-            "roughness_history": list of roughness values, starting with the
-                                  input mesh's roughness (index 0) followed
-                                  by the value after each accepted batch.
-            "mean_displacement": mean per-vertex displacement from the
-                                  original mesh at the stopping point.
-            "stopped_reason"   : one of "converged", "max_displacement",
-                                  "max_iterations".
+        Triangle face connectivity (unchanged).
+
+    RAISES
+    ------
+    TypeError
+        If verts or faces is None.
+    ValueError
+        If faces is empty, or if batch_iterations <= 0.
 
     EXAMPLE
     -------
-    >>> v2, f2, info = auto_smooth_mesh(verts, faces, max_displacement=0.05)
-    >>> print(info["iterations"], info["stopped_reason"])
+    >>> verts_smoothed, faces = auto_smooth_mesh(verts, faces, max_displacement=0.05)
     """
     #------------------------------------------------------------------
     # Validate inputs
@@ -970,36 +1011,49 @@ def auto_smooth_mesh(
 
 
 
-
-
 # =====================================================================
-# 12) _reorient_voxel_grid
+# 12) rotate_STL
 # =====================================================================
 def rotate_STL(verts: np.ndarray,
                 rotation: np.ndarray,) :
     """
     ============================================================================
-    5) _REORIENT_VOXEL_GRID
-    Reorients a 3D binary voxel grid according to a given rotation matrix.
-    The reorientation is done by rotating the physical 3D coordinates of the
-    solid voxels and then re-rasterizing onto a fresh regular grid.
+    12) ROTATE_STL
+    Rotates the vertices of a mesh with a 3x3 rotation matrix, about the
+    physical origin (0, 0, 0): each vertex v becomes R @ v. It rotates 
+    the mesh like the reoriented voxel grid, but find_optimal_orientation
+    rotates about the grid centre c while this function rotates about (0, 0, 0):
+    to land in the frame of new_x/new_y/new_z, pass verts - c and use the result.
     ============================================================================
 
     PARAMETERS
     ----------
+    verts : (N, 3) ndarray
+        Vertex coordinates.
+    rotation : (3, 3) array_like
+        Rotation matrix R. Must be a proper rotation (det = +1): with
+        det = -1 the mesh is mirrored and its normals point inward.
+        Not checked.
 
     RETURNS
     -------
-
+    verts_rotated : (N, 3) ndarray
+        Rotated vertex coordinates. The faces are unchanged and not
+        returned: keep using the original faces array.
 
     RAISES
     ------
-
+    TypeError
+        If verts is None.
 
     EXAMPLE
-
+    -------
+    >>> verts_rotated = rotate_STL(verts, rotation_matrix)
     """
     # ===== check inputs =====
+    if verts is None:
+        logger.error("rotate_STL(): verts is None.")
+        raise TypeError("verts must not be None.")
 
     #===== compute position of verts after rotation =====
     rotation = np.asarray(rotation, dtype=float)

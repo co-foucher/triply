@@ -2,12 +2,13 @@
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-
-from .tpms_base import TPMSModel, create_a_tpms
-
-
 """
+============================================================================
+TPMS_CUSTOM
+CustomTPMSModel: a TPMS model built from a precomputed implicit field
+instead of an equation.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - CustomTPMSModel (class)
@@ -16,6 +17,10 @@ from .tpms_base import TPMSModel, create_a_tpms
 3 - create_a_custom_tpms
 #=====================================================================================================================
 """
+
+import numpy as np
+
+from .tpms_base import TPMSModel, create_a_tpms
 
 
 # =====================================================================
@@ -28,7 +33,7 @@ class CustomTPMSModel(TPMSModel):
     TPMS model whose implicit surface is supplied directly as a
     precomputed scalar field array, instead of being computed from a
     hardcoded formula like GyroidModel/SchwartzPModel/etc. Same API as
-    every other TPMSModel subclass otherwise (compute_field, generate_mesh,
+    every other TPMSModel subclass otherwise (compute_density_field, generate_mesh,
     simplify_mesh, ...), except it takes no px/py/pz (see module NOTE).
     ============================================================================
 
@@ -79,7 +84,7 @@ class CustomTPMSModel(TPMSModel):
     -------
     >>> field = np.sin(x) + np.cos(y) + np.sin(z)  # or however the caller computed it
     >>> model = CustomTPMSModel(x, y, z, 0.2, field=field)
-    >>> field_out = model.compute_field()
+    >>> field_out = model.compute_density_field()
     """
 
     DEFAULT_FIELD_MODE = "distance"

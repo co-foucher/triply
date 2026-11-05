@@ -1,68 +1,24 @@
 # triply: design, meshing, simulation and CT analysis of TPMS structures
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
-
 """
-Ordered, reorderable processing pipeline for a loaded CT volume, built on
-top of triply.CT_scans's individual filter functions (threshold,
-dilate, erode, crop, connected-component, hole/island finding). Kept in
-its own component (rather than inline in app/pages/3_CT_Analysis.py) so
-that page stays focused on load/convert/preview; this file owns
-everything about "let the user apply these functions, in whatever order
-they want, with their own parameters".
+============================================================================
+CT_PIPELINE
+Reorderable processing pipeline for a loaded CT volume, built on the
+filter functions of triply.CT_scans (threshold, dilate, erode, crop, ...).
+============================================================================
 
-DESIGN
-------
-- _STEP_REGISTRY maps a human-readable operation name to its CT_scans
-  function, a small parameter spec (used to auto-generate the "add step"
-  widgets), and a `call` adapter that normalizes that function's actual
-  argument order/naming into a uniform `call(image, params_dict) -> image`
-  shape - each CT_scans function has a slightly different signature
-  (image first, image last, extra seed coordinates, ...), so the adapter
-  is what lets the rest of this module treat every step identically.
-- The pipeline itself is an ordered list of {"id", "type"} dicts in
-  st.session_state[f"{key}_steps"] (same model as the Field generator page).
-  `id` is 8 hex characters from uuid4, generated once when the step is
-  added; `type` is a _STEP_REGISTRY key. The step's PARAMETER VALUES are
-  NOT stored in that list: they live in the step's own widgets, keyed
-  f"{key}_{id}_{param name}", so every step stays editable after it has
-  been added, and moving or deleting a step never mixes up the values of
-  the others. Reordering/removing a step doesn't touch any image data -
-  "Run pipeline" replays every enabled step from the original loaded
-  array, so the list can be freely edited before (re-)running it. One
-  exception: when the only change since the last run is NEW steps added
-  after the previously run ones, only the new steps are run, starting
-  from the previous result. Only that last full result is kept in memory
-  (CT volumes are large), plus the 2D mid z-slice after each step for
-  the "Show result after step" preview.
-- The whole section is drawn by a @st.fragment (_render_pipeline_section),
-  so editing the pipeline reruns only this section, not the whole page.
-- The pipeline's settings (step list + every step's values) are kept
-  across page switches and can be saved to / loaded from a file, with
-  app.components.page_state and the prefix f"{key}_" (see SAVE / LOAD in
-  render_ct_pipeline).
-- watershed_algorithm is deliberately not included here: it needs two
-  extra mask inputs (sure_fg, sure_bg) beyond "the current image", which
-  doesn't fit this one-image-in-one-image-out step model. Left for a
-  future, separate step type that can reference other steps' outputs.
-- apply_mask_on_image DOES fit the model despite also needing a second
-  image: its mask isn't sourced from another step's output, just a
-  separate .mhd file path typed in as a param (see the "Apply mask" step
-  below and _load_mask_array), so the uniform call(image, params) -> image
-  shape still holds.
-- Turning the pipeline result into a 3D mesh lives in
-  app/pages/3_CT_Analysis.py, not here - see the "Generate 3D mesh"
-  section there, which calls triply.mesh_tools.mesh_from_matrix
-  directly on this module's returned result.
-- The step cards (_render_step) show "Crop"'s resulting shape
-  by tracking a running (Z, Y, X) shape through the step list and
-  recomputing it with _shape_after_crop, a small function that DUPLICATES
-  CT_scans.crop_images's own direction/point arithmetic rather than
-  running the real crop just to read `.shape` off the result. That's a
-  real coupling: if crop_images's direction handling ever changes,
-  _shape_after_crop needs the same change or the displayed size quietly
-  goes wrong without the pipeline itself breaking.
+NOTES
+-----
+- Each step type is registered in _STEP_REGISTRY with a call adapter, so
+  every step has the shape call(image, params) -> image.
+- Step values live in their widgets (f"{key}_{id}_{param}"), not in the step list.
+- "Run" replays all enabled steps from the loaded volume; only the last
+  result and each step's mid z-slice are kept in memory.
+- _shape_after_crop duplicates crop_images's arithmetic: change both together.
+- watershed_algorithm is not available: it needs two extra masks.
 """
+
 import json
 import os
 import uuid
@@ -125,29 +81,12 @@ def _load_mask_array(path: str) -> np.ndarray:
     RETURNS
     -------
     mask : np.ndarray
-        The mask volume, read-only (write flag disabled).
+        The mask volume, read-only.
 
     NOTES
     -----
-    Cached by Streamlit and keyed on `path` (a cheap string) - same
-    pattern as _load_mhd in app/pages/3_CT_Analysis.py, so re-running the
-    pipeline several times with the same mask path (e.g. while tweaking
-    an unrelated step's parameters) doesn't re-read the mask file from
-    disk on every "Run pipeline" click.
-
-    st.cache_resource, not st.cache_data: same reasoning as _load_mhd -
-    cache_data would hand back a fresh pickled copy of the mask on every
-    page rerun, not just when the mask path changes. cache_resource
-    returns the same object by reference instead. The read-only flag
-    below is the same safety net as _load_mhd's: the "Apply mask" step
-    only ever reads this mask (apply_mask_on_image does np.where(mask >
-    0, image, 0), never mutates it), but marking it read-only turns any
-    future accidental in-place mutation into an immediate crash instead
-    of silently corrupting the cached mask for the rest of the session.
-
-    max_entries=1: same reasoning as _load_mhd's cache cap - this holds
-    a full mask volume per entry, so switching mask files shouldn't keep
-    every previous one resident.
+    Cached with st.cache_resource (max_entries=1), keyed on path: every call
+    returns the same array, so it is made read-only to prevent accidental edits.
     """
 
     mask = sitk.GetArrayFromImage(sitk.ReadImage(path))
@@ -157,11 +96,26 @@ def _load_mask_array(path: str) -> np.ndarray:
 
 def _existing_mask_path(path: str) -> str:
     """
-    Returns `path` unchanged if it points to an existing file, otherwise
-    raises a ValueError with a readable message. Used by the "Apply mask"
-    step's "call" adapter, so an empty or wrong path is reported in the
-    step's card as "no mask file at ..." instead of SimpleITK's long
-    low-level read error.
+    ============================================================================
+    _EXISTING_MASK_PATH
+    Returns path if it points to an existing file, otherwise raises a
+    ValueError with a short readable message.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    path : str
+        Path of the mask file.
+
+    RETURNS
+    -------
+    path : str
+        The same path, if the file exists.
+
+    RAISES
+    ------
+    ValueError
+        If path is empty or is not an existing file.
     """
     if not path or not os.path.isfile(path):
         raise ValueError(f"No mask file at '{path}'. Select an existing .mhd file.")
@@ -226,10 +180,20 @@ _SELECTIONS_DIRNAME = "ct_manual_selections"
 
 def _selection_path(step_id: str) -> str:
     """
-    The .npz file holding the voxels selected for one step:
-    <output folder>/ct_manual_selections/<step id>.npz. Named after the
-    step id, so a pipeline loaded from a saved settings file (which keeps
-    the step ids) finds its selections again.
+    ============================================================================
+    _SELECTION_PATH
+    Returns the path of the .npz file holding the voxels selected for one
+    step: <output folder>/ct_manual_selections/<step_id>.npz.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    step_id : str
+        Id of the step (8 hex characters).
+
+    RETURNS
+    -------
+    selection_path : str
     """
     return str(get_output_dir() / _SELECTIONS_DIRNAME / f"{step_id}.npz")
 
@@ -265,10 +229,25 @@ def _load_selection(path: str, file_stamp: float) -> Tuple[np.ndarray, tuple]:
 
 def _voxels_inside(pixels: np.ndarray, shape: tuple) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
+    ============================================================================
+    _VOXELS_INSIDE
     Splits the (x, y, slice) rows of `pixels` into three index arrays
     (z_indices, y_indices, x_indices), keeping only the voxels inside a
     volume of (Z, Y, X) `shape`. Rows outside are dropped: the 3D brush
     can reach slices before the first / after the last one.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    pixels : (n, 3) ndarray of int
+        One (x, y, slice) row per selected voxel.
+    shape : tuple
+        (Z, Y, X) shape of the volume.
+
+    RETURNS
+    -------
+    z_indices, y_indices, x_indices : ndarray
+        Indices of the voxels inside the volume, ready for volume[z, y, x].
     """
     x_indices = pixels[:, 0]
     y_indices = pixels[:, 1]
@@ -282,10 +261,31 @@ def _voxels_inside(pixels: np.ndarray, shape: tuple) -> Tuple[np.ndarray, np.nda
 
 def _value_for_dtype(value: float, dtype: np.dtype):
     """
+    ============================================================================
+    _VALUE_FOR_DTYPE
     Converts the user's value to the volume's data type, or raises a
     ValueError if it can't be represented exactly: without this check,
     e.g. 300 written into an 8-bit volume would silently wrap around to 44,
     and 2.5 would silently become 2.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    value : float
+        Value typed by the user.
+    dtype : numpy dtype
+        Data type of the volume.
+
+    RETURNS
+    -------
+    value : dtype.type
+        The value converted to dtype.
+
+    RAISES
+    ------
+    ValueError
+        Boolean volume and value not 0 or 1; integer volume and value not a
+        whole number, or outside the dtype's range.
     """
     dtype = np.dtype(dtype)
     if np.issubdtype(dtype, np.bool_):
@@ -357,10 +357,25 @@ def _apply_manual_selection(image: np.ndarray, params: dict) -> np.ndarray:
 
 def _describe_manual_selection(params: dict, shape: tuple) -> str:
     """
+    ============================================================================
+    _DESCRIBE_MANUAL_SELECTION
     "describe" adapter of the "Manual selection (viewer)" step: number of
     selected voxels, how many fall outside the volume, and a warning if
     the selection was made on a volume of another shape than `shape`
     (the shape entering this step).
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    params : dict
+        The step's parameters ("selection", "mode", "value").
+    shape : tuple
+        (Z, Y, X) shape of the volume entering this step.
+
+    RETURNS
+    -------
+    description : str
+        The one-line summary shown on the step card.
     """
     selection = params["selection"]
     if selection["file_stamp"] == 0.0:
@@ -732,7 +747,12 @@ def _describe_params(step_type: str, params: dict, shape: tuple) -> str:
 # so the step list lives in st.session_state[f"{key}_steps"].
 
 def _add_step(key: str) -> None:
-    """on_click of "Add step": appends the step type picked in the selectbox."""
+    """
+    ============================================================================
+    _ADD_STEP
+    on_click of "Add step": appends the step type picked in the selectbox.
+    ============================================================================
+    """
     step_type = st.session_state[f"{key}_op_select"]
     # unique ID for this step (8 hex characters from uuid4): seeds all its widget keys
     step_id = uuid.uuid4().hex[:8]
@@ -740,7 +760,12 @@ def _add_step(key: str) -> None:
 
 
 def _move_step(key: str, step_id: str, delta: int) -> None:
-    """on_click of the up (delta=-1) / down (delta=+1) buttons of a step card."""
+    """
+    ============================================================================
+    _MOVE_STEP
+    on_click of the up (delta=-1) / down (delta=+1) buttons of a step card.
+    ============================================================================
+    """
     steps = st.session_state[f"{key}_steps"]
     index = next(position for position, step in enumerate(steps) if step["id"] == step_id)
     new_index = index + delta
@@ -750,11 +775,29 @@ def _move_step(key: str, step_id: str, delta: int) -> None:
 
 def _forget_step_values(key: str, step_id: str) -> None:
     """
+    ============================================================================
+    _FORGET_STEP_VALUES
     Deletes every session_state key of one step (f"{key}_{step_id}_...":
-    its parameter values, on/off toggle, buttons). Without this, the
-    values of a deleted step would stay in the page-switch mirror and in
-    saved files forever (see SAVE / LOAD in render_ct_pipeline), since
-    mirror_widget_state copies every key starting with the prefix.
+    its parameter values, on/off toggle, buttons).
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    key : str
+        Key prefix of this pipeline.
+    step_id : str
+        Id of the step.
+
+    RETURNS
+    -------
+    None
+
+    NOTES
+    -----
+    Without this, the values of a deleted step would stay in the page-switch
+    mirror and in saved files forever (see SAVE / LOAD in render_ct_pipeline),
+    since mirror_widget_state copies every key starting with the prefix.
+    The keys are also removed from the mirror itself.
     """
     step_prefix = f"{key}_{step_id}_"
     for state_key in list(st.session_state.keys()):
@@ -770,7 +813,12 @@ def _forget_step_values(key: str, step_id: str) -> None:
 
 
 def _delete_step(key: str, step_id: str) -> None:
-    """on_click of the delete button of a step card."""
+    """
+    ============================================================================
+    _DELETE_STEP
+    on_click of the delete button of a step card.
+    ============================================================================
+    """
     st.session_state[f"{key}_steps"] = [
         step for step in st.session_state[f"{key}_steps"] if step["id"] != step_id
     ]
@@ -778,7 +826,12 @@ def _delete_step(key: str, step_id: str) -> None:
 
 
 def _clear_steps(key: str) -> None:
-    """on_click of "Clear all": removes every step, and the error messages of the last run."""
+    """
+    ============================================================================
+    _CLEAR_STEPS
+    on_click of "Clear all": removes every step, and the error messages of the last run.
+    ============================================================================
+    """
     for step in st.session_state[f"{key}_steps"]:
         _forget_step_values(key, step["id"])
     st.session_state[f"{key}_steps"] = []
@@ -837,7 +890,12 @@ def _render_add_step(key: str, number_of_steps: int) -> None:
 
 
 def _clear_selection(selection_path: str) -> None:
-    """on_click of "Clear selection": deletes the step's selection file."""
+    """
+    ============================================================================
+    _CLEAR_SELECTION
+    on_click of "Clear selection": deletes the step's selection file.
+    ============================================================================
+    """
     if os.path.isfile(selection_path):
         os.remove(selection_path)
 
@@ -1044,7 +1102,12 @@ def _render_step(key: str, index: int, number_of_steps: int, step: dict, shape: 
 # 10) _StepError + _step_signature + _run_pipeline
 # =====================================================================
 class _StepError(Exception):
-    """Raised by _run_pipeline when one step fails; remembers which step (its id)."""
+    """
+    ============================================================================
+    _STEPERROR
+    Raised by _run_pipeline when one step fails; remembers which step (its id).
+    ============================================================================
+    """
 
     def __init__(self, step_id: str, message: str):
         super().__init__(message)
@@ -1053,21 +1116,50 @@ class _StepError(Exception):
 
 def _step_signature(config: dict) -> tuple:
     """
+    ============================================================================
+    _STEP_SIGNATURE
     Returns (step type, parameters as a sorted JSON string) for one step:
     two steps with the same signature produce the same output from the
     same input. Used to tell whether the result is out of date and
     whether a run can continue from the previous result (see
-    render_ct_pipeline). The step id is deliberately NOT part of it: what
-    matters is what the step does, not which card it is.
+    render_ct_pipeline).
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    config : dict
+        One step: {"type": ..., "params": {...}, ...}.
+
+    RETURNS
+    -------
+    signature : tuple
+        (config["type"], json.dumps(config["params"], sort_keys=True)).
+
+    NOTES
+    -----
+    The step id is deliberately NOT part of it: what matters is what the step
+    does, not which card it is.
     """
     return (config["type"], json.dumps(config["params"], sort_keys=True))
 
 
 def _mid_z_slice(volume: np.ndarray) -> np.ndarray:
     """
+    ============================================================================
+    _MID_Z_SLICE
     Copy of the middle z-slice of a (Z, Y, X) volume. A copy, not a view,
     so it stays valid (and small: one (Y, X) image) after the volume is
     replaced or modified in place by a later step.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    volume : (Z, Y, X) ndarray
+
+    RETURNS
+    -------
+    mid_slice : (Y, X) ndarray
+        Copy of volume[Z // 2, :, :].
     """
     mid_z_index = volume.shape[0] // 2
     return np.array(volume[mid_z_index, :, :], copy=True)
@@ -1154,7 +1246,7 @@ def _build_result_fig(mid_slice: np.ndarray, spacing: tuple = (1.0, 1.0, 1.0)) -
     Z-slices or pipeline steps are involved, so hashing it directly on
     every rerun is cheap (unlike hashing the full `result`, which is
     exactly the large-array cost _load_histogram's docstring in
-    app/pages/3_CT_Analysis.py warns against). Because the hash is of
+    app/pages/5_CT_Analysis.py warns against). Because the hash is of
     the actual data, there's no separate "did it change" signal to
     maintain by hand - no version counter to remember to bump, no
     session-state key beyond `result_key` itself. A rerun that slices
@@ -1231,10 +1323,24 @@ def _render_result_preview(result: np.ndarray, snapshots: list, key: str, spacin
 # =====================================================================
 def _not_saved(key: str) -> Tuple[tuple, tuple]:
     """
+    ============================================================================
+    _NOT_SAVED
     Returns (exclude_keys, exclude_suffixes): the session_state keys of
     this pipeline that are NOT mirrored across page switches nor written
     to a saved settings file (see SAVE / LOAD in render_ct_pipeline).
+    ============================================================================
 
+    PARAMETERS
+    ----------
+    key : str
+        Key prefix of this pipeline.
+
+    RETURNS
+    -------
+    exclude_keys, exclude_suffixes : tuple of str
+
+    NOTES
+    -----
     exclude_keys - results of a run, not settings:
         {key}_result, {key}_snapshots         numpy arrays: can't go in JSON, and are large
         {key}_last_run                        tied to the volume loaded in memory (its id())

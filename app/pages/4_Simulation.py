@@ -1,16 +1,25 @@
 # triply: design, meshing, simulation and CT analysis of TPMS structures
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
-
 """
-Mesh an STL with fTetWild, then create/run an ABAQUS simulation from it.
+Simulation page: STL -> tetrahedral mesh -> ABAQUS input -> ABAQUS solve -> results.
 
-STATUS: scaffold. Wires the real triply.TET_mesh_tools /
-abaqus_tools calls into the UI with a minimal set of parameters (matching
-examples/generate_frequency_sim.py and notebooks/full simulation
-workflow.ipynb) - extend the forms below as more simulation types/options
-are needed. Both external calls are long-running, so they run in a
-background thread via app.jobs (see that module's docstring for why).
+SECTIONS
+--------
+1. Tetrahedral meshing: fTetWild meshes the STL into a tet mesh (.inp).
+2. Create ABAQUS simulation: pick a simulation type - "Frequency analysis"
+   (pybaqus/generate_frequency_sim.py) or "Static analysis"
+   (pybaqus/generate_static_sim.py, with the load-case form and a preview of
+   the loaded faces). The script is copied into the simulation folder and
+   run headless to write Job-<name>.inp.
+3. Run ABAQUS simulation: solves Job-<name>.inp (in <name>_sim/run).
+4. Extract results from ODB (static case only): one field output at a node
+   set, written to a file.
+
+Steps 1-3 are long-running external calls, so they run in a background
+thread via app.components.jobs (start_job / render_job_status), and the
+functions they run live in app.components.Simulation_source. Step 4 runs
+directly.
 """
 import sys
 from pathlib import Path

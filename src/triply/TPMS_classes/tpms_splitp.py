@@ -2,13 +2,12 @@
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-
-# Use relative imports so this module works when used as a package
-from .tpms_base import TPMSModel, create_a_tpms
-
-
 """
+============================================================================
+TPMS_SPLITP
+Split P TPMS type (SplitPModel) and its create_a_split_p() pipeline.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - SplitPModel (class)
@@ -26,8 +25,13 @@ implicit surface equation.
 USE EXAMPLE
 -----------
 >>> model = SplitPModel(x, y, z, px, py, pz, thickness)
->>> field = model.compute_field()
+>>> field = model.compute_density_field()
 """
+
+import numpy as np
+
+# Use relative imports so this module works when used as a package
+from .tpms_base import TPMSModel, create_a_tpms
 
 
 # =====================================================================
@@ -69,11 +73,11 @@ class SplitPModel(TPMSModel):
     EXAMPLE
     -------
     >>> model = SplitPModel(x, y, z, px, py, pz, thickness)
-    >>> field = model.compute_field()
+    >>> field = model.compute_density_field()
     >>> model = SplitPModel.load("gyroid_data.npz")
     """
 
-    # Same convention as GyroidModel: compute_field() with no mode defaults
+    # Same convention as GyroidModel: compute_density_field() with no mode defaults
     # to "distance".
     DEFAULT_FIELD_MODE = "distance"
 
@@ -183,7 +187,7 @@ def create_a_split_p(x: np.ndarray,
         Target fraction of faces to keep during simplification (0.5 = keep
         50% of faces), or target number of faces if >1 (e.g. 10000). Default = 0.9.
     field_mode : str, optional
-        Field computation mode passed to SplitPModel.compute_field
+        Field computation mode passed to SplitPModel.compute_density_field
         (default = "distance").
 
     RETURNS

@@ -55,7 +55,13 @@ _ALWAYS_SKIPPED_SUFFIXES = ("_browse_btn",)
 
 
 def _mirror_key(prefix: str) -> str:
-    """Plain session_state key holding the mirrored values of one page."""
+    """
+    ============================================================================
+    _MIRROR_KEY
+    Plain session_state key holding the mirrored values of one page:
+    f"{prefix}_mirror".
+    ============================================================================
+    """
     return f"{prefix}_mirror"
 
 
@@ -122,11 +128,29 @@ def _collect_page_state(prefix: str,
                         exclude_keys: tuple = (),
                         exclude_suffixes: tuple = ()) -> dict:
     """
+    ============================================================================
+    _COLLECT_PAGE_STATE
     {key: value} of every st.session_state key starting with `prefix`,
     except the mirror itself, `exclude_keys`, and keys ending with one of
     `exclude_suffixes` or _ALWAYS_SKIPPED_SUFFIXES. Shared by
     mirror_widget_state() and save_page_state(), so a saved file holds
     exactly what a page switch keeps.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    prefix : str
+        The page's widget-key prefix, e.g. "fg_".
+    exclude_keys : tuple, optional
+        Keys to leave out (default = ()).
+    exclude_suffixes : tuple, optional
+        Key endings to leave out, on top of _ALWAYS_SKIPPED_SUFFIXES
+        ("_browse_btn") (default = ()).
+
+    RETURNS
+    -------
+    page_state : dict
+        {key: value} of the selected keys.
     """
     skipped_suffixes = _ALWAYS_SKIPPED_SUFFIXES + tuple(exclude_suffixes)
     mirror_key = _mirror_key(prefix)
@@ -166,7 +190,17 @@ STATE_FILE_VERSION = 1
 
 
 def get_saves_dir() -> Path:
-    """<output folder>/sessions_saves, created if needed."""
+    """
+    ============================================================================
+    GET_SAVES_DIR
+    <output folder>/sessions_saves, created if needed.
+    ============================================================================
+
+    RETURNS
+    -------
+    saves_dir : Path
+        get_output_dir() / SAVES_DIRNAME ("sessions_saves").
+    """
     d = get_output_dir() / SAVES_DIRNAME
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -279,7 +313,23 @@ def load_page_state(prefix: str, path: Path) -> int:
 
 
 def _list_state_files(prefix: str) -> list:
-    """Files of get_saves_dir() saved for this page, newest first (unreadable ones skipped)."""
+    """
+    ============================================================================
+    _LIST_STATE_FILES
+    Files of get_saves_dir() saved for this page, newest first (unreadable ones skipped).
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    prefix : str
+        The page's widget-key prefix; a file belongs to the page if its JSON
+        "prefix" field equals it.
+
+    RETURNS
+    -------
+    files : list of Path
+        The matching .json files, sorted by modification time, newest first.
+    """
     files = []
     for p in sorted(get_saves_dir().glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:

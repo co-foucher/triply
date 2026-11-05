@@ -32,19 +32,20 @@ with st.spinner("Loading triply toolkit..."):
 """
 #=====================================================================================================================
 0 - (reserved)
-1 - Param (dataclass) + STEP_TYPES / BLEND_OPS definitions
-2 - make_grid
+1 - Param (dataclass)
+2 - step type definitions   (helpers _box_center / _quarter_min_size / _half_min_size,
+                             STEP_TYPES, GENERATOR_TYPES / MODIFIER_TYPES, BLEND_OPS, INTENDED_USES)
+2b - make_grid              (imported from tpms_source_panel, not defined here - note on grid_key only)
 3 - _spacing
-4 - _compute_layer          (generator steps, cached)
+4 - _compute_layer          (generator steps, cached; helper _other_axes)
 5 - _geometry_mask          (voxelize STL / .npy onto the grid, cached)
-6 - _apply_modifier         (modifier steps)
+6 - _apply_modifier         (modifier steps; helpers _parse_points, render_modifier_plot)
 7 - _blend
 8 - run_pipeline
-9 - step list callbacks     (add_step, _move_step, _delete_step, clear_steps)
+9 - step list callbacks     (get_steps, add_step, _move_step, _delete_step, clear_steps)
 10 - _render_params
 11 - render_step
 12 - check_intended_use
-13 - render_doc
 #=====================================================================================================================
 """
 
@@ -60,7 +61,7 @@ DEFAULT_GRID = {"size_x": 10.0, "size_y": 10.0, "size_z": 10.0, "resolution": 64
 class Param:
     """
     ============================================================================
-    PARAM
+    1) PARAM
     Declares one user-editable parameter of a step type (one entry of
     STEP_TYPES[...]["params"]).
     ============================================================================
@@ -335,7 +336,7 @@ INTENDED_USES = ("Implicit field", "Threshold", "Thickness", "Period")
 
 
 # =====================================================================
-# 2) make_grid
+# 2b) make_grid
 # =====================================================================
 # Imported from app.components.tpms_source_panel (see the imports above) so
 # both pages build the exact same grid:
@@ -350,7 +351,24 @@ INTENDED_USES = ("Implicit field", "Threshold", "Thickness", "Period")
 # 3) _spacing
 # =====================================================================
 def _spacing(grid_key: tuple) -> Tuple[float, float, float]:
-    """Voxel spacing (dx, dy, dz) = size / (res - 1) for linspace grids (origin-independent)."""
+    """
+    ============================================================================
+    3) _SPACING
+    Voxel spacing (dx, dy, dz) = size / (res - 1) for linspace grids (origin-independent).
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    grid_key : tuple
+        (size_x, size_y, size_z, resolution, origin_x, origin_y, origin_z);
+        resolution = number of points along each axis.
+
+    RETURNS
+    -------
+    dx, dy, dz : float
+        size_x / (resolution - 1), and the same for y and z
+        (resolution - 1 is replaced by 1 if resolution = 1).
+    """
     sx, sy, sz, res = grid_key[:4]
     n = max(res - 1, 1)
     return sx / n, sy / n, sz / n
@@ -491,7 +509,26 @@ def _compute_layer(step_type: str, params_json: str, grid_key: tuple,
 
 
 def _other_axes(axis: str, X, Y, Z, c):
-    """For a cylinder/radial axis, returns the two perpendicular (coord, center) pairs."""
+    """
+    ============================================================================
+    _OTHER_AXES
+    For a cylinder/radial axis, returns the two perpendicular (coord, center) pairs.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    axis : str
+        "x", "y" or "z": the cylinder axis.
+    X, Y, Z : ndarray
+        Coordinate grids.
+    c : sequence of 3 floats
+        Centre (c_x, c_y, c_z).
+
+    RETURNS
+    -------
+    ((coord_1, centre_1), (coord_2, centre_2)) : tuple
+        The two other axes, e.g. axis="z" -> ((X, c_x), (Y, c_y)).
+    """
     pairs = {"x": ((Y, c[1]), (Z, c[2])), "y": ((X, c[0]), (Z, c[2])), "z": ((X, c[0]), (Y, c[1]))}
     return pairs[axis]
 
@@ -636,10 +673,26 @@ def _apply_modifier(step_type: str, p: dict, f: np.ndarray, grid_key: tuple) -> 
 
 def _parse_points(text: str) -> Tuple[np.ndarray, np.ndarray]:
     """
+    ============================================================================
+    _PARSE_POINTS
     Parses the "Piecewise linear" points: one "a, g" pair per line (comma,
-    semicolon or spaces as separator, blank lines ignored). Returns them
-    sorted by a. Raises ValueError for a malformed line, fewer than 2
-    points, or two points with the same a.
+    semicolon or spaces as separator, blank lines ignored).
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    text : str
+        The text typed in the Points box.
+
+    RETURNS
+    -------
+    a_values, g_values : ndarray
+        The points, sorted by a.
+
+    RAISES
+    ------
+    ValueError
+        For a malformed line, fewer than 2 points, or two points with the same a.
     """
     pts = []
     for n, line in enumerate(str(text).splitlines(), start=1):
@@ -846,7 +899,14 @@ def get_steps() -> list:
 
 
 def add_step() -> None:
-    """on_click of "Add step": appends the step picked in the selectbox."""
+    """
+    ============================================================================
+    ADD_STEP
+    on_click of "Add step": appends the step picked in the selectbox.
+    Its id is 8 hex characters from uuid4; its blend is "Replace" if it is the
+    first step, "Add" otherwise.
+    ============================================================================
+    """
     step_type = st.session_state["fg_new_step_type"]
     # create a unique ID for this step (8 hex chars from uuid4) and store it in the session state
     sid = uuid.uuid4().hex[:8]  

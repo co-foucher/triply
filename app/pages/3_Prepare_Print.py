@@ -90,7 +90,28 @@ page_parameters = st.session_state["page_parameters"]
 @st.cache_data(show_spinner=False, max_entries=2)
 def load_a_geometry_from_STL(stl_path: str, resolution: int):
     """
+    ============================================================================
+    LOAD_A_GEOMETRY_FROM_STL
     Load a geometry from an STL file and convert it to a voxel matrix.
+    Cached (st.cache_data, last 2 calls).
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    stl_path : str
+        Path of the STL file.
+    resolution : int
+        Voxelization resolution, passed to mesh_tools.matrix_from_mesh.
+
+    RETURNS
+    -------
+    verts, faces : ndarray
+        The STL mesh.
+    geometry_matrix : (nx, ny, nz) uint8 ndarray
+        1 = solid (interior included), 0 = empty.
+    X, Y, Z : (nx, ny, nz) ndarray
+        Voxel coordinates, as 3D 'ij' grids (matrix_from_mesh returns 1D
+        axes; they are expanded with np.meshgrid here).
     """
     verts, faces = load_STL(stl_path)
     X, Y, Z, geometry_matrix = matrix_from_mesh(verts = verts, faces = faces, resolution = resolution)

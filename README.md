@@ -39,4 +39,4 @@ Installation options, a quick start, and the list of modules are in the **[tripl
 
 ## Good to know
 - **Renamed in v4.0.0:** this project used to be `gyroid_utils` (repo `GYROIDS`). Replace `import gyroid_utils` with `import triply`.
-- **License:** EMPA, see the `license` field in `pyproject.toml`.
+- **License:** MIT, see the `license` field in `pyproject.toml`.

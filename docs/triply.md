@@ -48,7 +48,7 @@ model = GyroidModel(x, y, z, px=1.0, py=1.0, pz=1.0, thickness=0.2)
 
 # 3) Density field. Modes: "distance" (default), "distance_fast", "band",
 #    "signed", "signed_inverse". `level` moves the surface off F = 0.
-model.compute_field(mode="distance", level=0.0)
+model.compute_density_field(mode="distance", level=0.0)
 
 # 4) Mesh: marching cubes, then smooth, simplify and repair
 model.generate_mesh()

@@ -2,19 +2,27 @@
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-import trimesh  # type: ignore
-from typing import Callable, Optional, Sequence, Tuple
-
-from . import mesh_tools
-from .logger import logger, set_log_level  # type: ignore
-
-
 """
+============================================================================
+ADAPTIVE_MESHING
+Adaptive meshing of an implicit field: cells refined only near the surface,
+then meshed.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - CORNER_OFFSETS, NEIGHBOR_OFFSETS (constants)
 2 - Cells (class)
+2a - Cells.__init__
+2b - Cells.__len__
+2c - Cells._build_cell_number_at_location
+2d - Cells.compute_values
+2e - Cells.crosses_surface
+2f - Cells.face_neighbours_of
+2g - Cells.remove_unlikely_neighbours
+2h - Cells.select
+2i - Cells.subdivide
+2j - Cells.add_box
 3 - create_cells
 4 - refine_cells
 5 - mesh_cells
@@ -23,7 +31,7 @@ from .logger import logger, set_log_level  # type: ignore
 NOTE ON THIS MODULE
 --------------------
 Adaptive (refined near the surface) meshing of an implicit field, as developed
-in notebooks/adaptive_resolution_multilevel_2.ipynb.
+in notebooks/adaptive_resolution_multilevel.ipynb.
 
 Everything is defined at CORNERS: the field is evaluated at the corners of the
 grid, and a CELL is the cube between 8 neighbouring corners.
@@ -70,6 +78,13 @@ verts, faces = triply.adaptive_meshing.mesh_cells(cells)
 
 triply.viz.view_mesh(faces, verts)
 """
+
+import numpy as np
+import trimesh  # type: ignore
+from typing import Callable, Optional, Sequence, Tuple
+
+from . import mesh_tools
+from .logger import logger, set_log_level  # type: ignore
 
 
 # =====================================================================
@@ -128,13 +143,24 @@ class Cells:
     # =====================================================================
     def __init__(self, x: np.ndarray, y: np.ndarray, z: np.ndarray):
         """
+        ============================================================================
+        2a) __INIT__
         Puts a regular grid of points into the form of cells. Computes no field and selects no cell.
+        ============================================================================
 
         PARAMETERS
         ----------
         x, y, z : (number of points along x, number of points along y, number of points along z) ndarray
             Position of every grid point, indexed [i, j, k] (from np.meshgrid(..., indexing="ij")).
 
+        RAISES
+        ------
+        ValueError
+            If x is not 3D or has fewer than 2 points along an axis, or if x, y and z
+            do not have the same shape.
+
+        NOTES
+        -----
         Every group of 8 neighbouring points makes one cell, so there are
         (number of points along x - 1) * (number of points along y - 1) * (number of points along z - 1) cells.
         Corner (i, j, k) is at position origin + (i, j, k) * resolution, origin being the position of point [0, 0, 0].
@@ -191,7 +217,16 @@ class Cells:
     # 2b) __len__
     # =====================================================================
     def __len__(self) -> int:
-        """Number of cells: lets you write len(cells)."""
+        """
+        ============================================================================
+        2b) __LEN__
+        Number of cells: lets you write len(cells).
+        ============================================================================
+
+        RETURNS
+        -------
+        number_of_cells : int
+        """
         return self.first_corners.shape[0]
 
     # =====================================================================
@@ -199,9 +234,17 @@ class Cells:
     # =====================================================================
     def _build_cell_number_at_location(self) -> None:
         """
+        ============================================================================
+        2c) _BUILD_CELL_NUMBER_AT_LOCATION
         Builds the dictionary cell location (i, j, k) -> cell number (its row in first_corners).
         Must be called again every time first_corners changes (__init__, subdivide, select).
         (The leading "_" means: used inside the class only.)
+        ============================================================================
+
+        RETURNS
+        -------
+        None
+            Fills self.cell_number_at_location.
         """
         self.cell_number_at_location = {}
         for cell_number in range(self.first_corners.shape[0]):
@@ -214,10 +257,25 @@ class Cells:
     def compute_values(self, 
                        field_function: Optional[Callable] = None) -> "Cells":
         """
+        ============================================================================
+        2d) COMPUTE_VALUES
         Computes the field at the 8 corners of every cell and stores it in self.values (number of cells, 8).
-        field_function(x, y, z): positions (any shape) -> field values (same shape).
-        None (default): uses self.field_function, the one stored by create_cells.
-        Returns self.
+        ============================================================================
+
+        PARAMETERS
+        ----------
+        field_function : callable, optional
+            field_function(x, y, z): positions (any shape) -> field values (same shape).
+            None (default): uses self.field_function, the one stored by create_cells.
+
+        RETURNS
+        -------
+        self : Cells
+
+        RAISES
+        ------
+        ValueError
+            If no field_function is given and none is stored in self.field_function.
         """
         if field_function is None:      #  try in case the user already defined self.field_function
             field_function = self.field_function
@@ -232,8 +290,19 @@ class Cells:
     # =====================================================================
     def crosses_surface(self) -> "Cells":
         """
+        ============================================================================
+        2e) CROSSES_SURFACE
         Fills the mask is_crossing_surface (number of cells,): True for the cells with
-        some corners solid (value > 0) but not all. Returns self.
+        some corners solid (value > 0) but not all.
+        ============================================================================
+
+        RETURNS
+        -------
+        self : Cells
+
+        NOTES
+        -----
+        Needs compute_values() first: self.values is None until then.
         """
         corner_is_solid = self.values[:, :] > 0                                            # (number of cells, 8)
         self.is_crossing_surface = corner_is_solid.any(axis=1) & ~corner_is_solid.all(axis=1)   # (number of cells,)
@@ -244,8 +313,23 @@ class Cells:
     # =====================================================================
     def face_neighbours_of(self, mask: np.ndarray) -> "Cells":
         """
+        ============================================================================
+        2f) FACE_NEIGHBOURS_OF
         Fills the mask is_face_neighbour (number of cells,): True for the cells sharing a FACE
-        or an EDGE (see NEIGHBOR_OFFSETS) with a cell where input mask is True. Returns self.
+        or an EDGE (see NEIGHBOR_OFFSETS) with a cell where input mask is True.
+        ============================================================================
+
+        PARAMETERS
+        ----------
+        mask : (number of cells,) ndarray of bool
+            Cells whose neighbours are looked for.
+
+        RETURNS
+        -------
+        self : Cells
+
+        NOTES
+        -----
         Only cells of this collection can be found: a neighbour outside the grid,
         or not kept at this level, is skipped.
         """
@@ -262,13 +346,27 @@ class Cells:
     # =====================================================================
     def remove_unlikely_neighbours(self, factor: float = 0.25) -> "Cells":
         """
+        ============================================================================
+        2g) REMOVE_UNLIKELY_NEIGHBOURS
         Removes from the mask is_face_neighbour the neighbours whose corners all stay far from 0
-        (the surface): they probably do not contain it. Changes nothing else. Returns self.
+        (the surface): they probably do not contain it. Changes nothing else.
+        ============================================================================
 
+        PARAMETERS
+        ----------
+        factor : float, optional
+            A neighbour is removed if closest_to_0 >= factor * (largest spread among the neighbours)
+            (default = 0.25).
+
+        RETURNS
+        -------
+        self : Cells
+
+        NOTES
+        -----
         Per neighbour cell:
             closest_to_0 = smallest |corner value|                          (how close its corners get to the surface)
             spread       = largest corner value - smallest corner value     (how much the field varies across the cell)
-        A neighbour is removed if closest_to_0 >= factor * (largest spread among the neighbours).
         """
         # No neighbour at all (e.g. no cell crosses the surface): nothing to remove,
         # and np.max below would fail on an empty array
@@ -298,12 +396,28 @@ class Cells:
     # =====================================================================
     def select(self, mask: np.ndarray) -> "Cells":
         """
+        ============================================================================
+        2h) SELECT
         Keeps only the cells where mask is True, in place, and removes the others.
+        ============================================================================
+
+        PARAMETERS
+        ----------
         mask : (number of cells,) True / False
 
+        RETURNS
+        -------
+        self : Cells
+
+        RAISES
+        ------
+        ValueError
+            If mask is not a True / False array of shape (number of cells,).
+
+        NOTES
+        -----
         Every per-cell array is cut with the same mask, so row n still describes the same cell in all of them.
         The masks is_crossing_surface / is_face_neighbour are NOT cut: recompute them before using them again.
-        Returns self.
         """
         # ---- 1) Check the mask ----
         # An integer array would not be read as True / False but as a list of cell numbers: refuse it
@@ -330,10 +444,19 @@ class Cells:
     # =====================================================================
     def subdivide(self) -> "Cells":
         """
+        ============================================================================
+        2i) SUBDIVIDE
         Makes this Cells one level finer, in place: every cell is replaced by its 8 children, of half the size.
+        ============================================================================
+
+        RETURNS
+        -------
+        self : Cells
+
+        NOTES
+        -----
         Child first corners: (2i + a, 2j + b, 2k + c), a, b, c = 0 or 1. Their values are not computed yet.
         The origin does not change: index (0, 0, 0) stays at the same position at every level.
-        Returns self.
         """
         # ---- 1) New cell locations and resolution ----
         # (number of cells, 1, 3) * 2 + (1, 8, 3) -> (number of cells, 8, 3), then one row per child
@@ -367,21 +490,30 @@ class Cells:
     # =====================================================================
     def add_box(self, box_margin: float = 1e-6) -> "Cells":
         """
+        ============================================================================
+        2j) ADD_BOX
         Closes the lattice at the box faces: every corner value becomes
         min(value, distance from the corner to the nearest box face - box_margin).
         Inside the box the distance is positive, so the lattice is unchanged away from the faces;
         on a face it is -box_margin, so the corner becomes just empty and a cap closes the lattice there.
-        Updates self.values (number of cells, 8). Returns self.
-
-        Call it right after compute_values(), at every level: compute_values() brings back the field without the box.
-
-        The box is the one covered by the grid given to __init__: [origin, origin + box_size]
-        along each axis (self.origin, self.box_size). For a grid starting at 0, that is [0, box_size].
+        Updates self.values (number of cells, 8).
+        ============================================================================
 
         PARAMETERS
         ----------
         box_margin : float, optional
             Margin to the box faces (default 1e-6).
+
+        RETURNS
+        -------
+        self : Cells
+
+        NOTES
+        -----
+        Call it right after compute_values(), at every level: compute_values() brings back the field without the box.
+
+        The box is the one covered by the grid given to __init__: [origin, origin + box_size]
+        along each axis (self.origin, self.box_size). For a grid starting at 0, that is [0, box_size].
         """
         # Corner positions measured from the box start (= self.origin), each (number of cells, 8)
         x = self.positions[:, :, 0] - self.origin[0]

@@ -51,9 +51,10 @@ Plain (non-widget) state
     fg_steps                          list of {"id": sid, "type": step_type}: order and type of the steps
 
 """
-# Repo root isn't on sys.path by default - add it before importing
-# anything under `app.*`. See app/_bootstrap.py for why this is inlined
-# per-file rather than a shared import.
+# Repo root isn't on sys.path by default - add it before importing anything
+# under `app.*`. Inlined in every entry point rather than a shared import,
+# because importing a shared helper would already need the repo root on
+# sys.path (see the same comment in app/Home.py). parents[2] = repo root.
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))

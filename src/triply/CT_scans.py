@@ -2,19 +2,14 @@
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-import pydicom
-from pathlib import Path
-from .logger import logger
-import sys
-import SimpleITK as sitk
-import tifffile as tiff
-from PIL import Image as PILImage
-from .CT_visualization_window import open_window, lightweigth_open
-#from triply import CT_visualization_window
-
-
 """
+============================================================================
+CT_SCANS
+Converting CT slice stacks (DICOM, TIFF, JPG) into .mhd volumes, and
+processing them: reading, cropping, thresholding, morphological filters,
+connected regions, holes/islands, watershed, masks.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - convert_dicomm_to_mhd
@@ -35,14 +30,23 @@ from .CT_visualization_window import open_window, lightweigth_open
 16 - invert_mask
 17 - convert_data_type
 #=====================================================================================================================
-"""
 
-"""
 GENERAL NOTE ON FUNCTION DESIGN:
 1) All functions should be designed to be as modular and reusable as possible.
 2) Function should try to only output numpy arrays or simple data structures
 3) functions should to take into input either numpy arrays or sitk images
 """
+
+import numpy as np
+import pydicom
+from pathlib import Path
+from .logger import logger
+import sys
+import SimpleITK as sitk
+import tifffile as tiff
+from PIL import Image as PILImage
+from .CT_visualization_window import open_window, lightweigth_open
+#from triply import CT_visualization_window
 
 
 # =====================================================================

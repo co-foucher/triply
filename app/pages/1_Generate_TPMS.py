@@ -78,9 +78,10 @@ Plain (non-widget) state, set by generate_ui_tpms() (tpms_source_panel)
     current_model                         the last generated TPMSModel (initialized by app.state.init_state)
     current_field_range                   (min, max) of its implicit field, for the slice colour scale
 """
-# Repo root isn't on sys.path by default - add it before importing
-# anything under `app.*`. See app/_bootstrap.py for why this is inlined
-# per-file rather than a shared import.
+# Repo root isn't on sys.path by default - add it before importing anything
+# under `app.*`. Inlined in every entry point rather than a shared import,
+# because importing a shared helper would already need the repo root on
+# sys.path (see the same comment in app/Home.py). parents[2] = repo root.
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -142,7 +143,7 @@ BUILTIN_TYPES = {
 }
 
 
-# ---- Field modes (label -> TPMSModel.compute_field(mode=...) argument) ----
+# ---- Field modes (label -> TPMSModel.compute_density_field(mode=...) argument) ----
 from app.components.tpms_source_panel import (
     _adapt_resolution,
     conformal_coords,
@@ -163,6 +164,8 @@ from app.components.tpms_source_panel import (
 @dataclass
 class TPMSParams:
     """
+    ============================================================================
+    TPMSPARAMS
     Bundles every generation setting the "Generate" button and
     generate_ui_tpms() need, including the per-source-only inputs
     (periods px/py/pz, type_name, custom_equation, ...) that only one
@@ -171,6 +174,7 @@ class TPMSParams:
     _make_user_define_parameters() is an @st.fragment: a fragment-only
     rerun only re-executes that function, so a plain local variable set
     there would never reach the rest of the script.
+    ============================================================================
     """
     # ----- grid parameters -----
     size_x: float = 10.0
@@ -514,11 +518,30 @@ def _export_thickness_field(model, name):
     return "error", "Thickness field is not a valid 3D array, nothing saved."
 
 def _export_density_field(model, name):
-    """Save the density field (the grid that marching cubes turned into the mesh).
+    """
+    ============================================================================
+    _EXPORT_DENSITY_FIELD
+    Saves the occupancy of the density field (the grid that marching cubes
+    turned into the mesh) as <output folder>/<name>_density.npy: uint8,
+    1 where density_field > 0 (solid), 0 elsewhere. Not the field values.
 
     This is the field *after* any geometry combination (union / intersection /
     subtraction), because generate_ui_tpms() edits model.density_field in place.
     The mesh is its density = 0 iso-surface: solid where density > 0.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    model : TPMSModel
+        The generated model.
+    name : str
+        File name, without "_density.npy".
+
+    RETURNS
+    -------
+    status, message : str
+        ("success", "Saved <path>"), or ("warning", "No density field to export.")
+        if the model has no density field.
     """
     if model.density_field is None:
         return "warning", "No density field to export."

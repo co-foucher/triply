@@ -2,13 +2,13 @@
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-
-# Use relative imports so this module works when used as a package
-from .tpms_base import TPMSModel, create_a_tpms
-
-
 """
+============================================================================
+TPMS_SCHWARTZP
+Schwartz P TPMS type (SchwartzPModel) and its create_a_schwartz_p()
+pipeline.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - SchwartzPModel (class)
@@ -26,8 +26,13 @@ implicit surface equation.
 USE EXAMPLE
 -----------
 >>> model = SchwartzPModel(x, y, z, px, py, pz, thickness)
->>> field = model.compute_field()
+>>> field = model.compute_density_field()
 """
+
+import numpy as np
+
+# Use relative imports so this module works when used as a package
+from .tpms_base import TPMSModel, create_a_tpms
 
 
 # =====================================================================
@@ -66,11 +71,11 @@ class SchwartzPModel(TPMSModel):
     EXAMPLE
     -------
     >>> model = SchwartzPModel(x, y, z, px, py, pz, thickness)
-    >>> field = model.compute_field()
+    >>> field = model.compute_density_field()
     >>> model = SchwartzPModel.load("gyroid_data.npz")
     """
 
-    # Matches the original SchwartzP.py behavior: compute_field() with no
+    # Matches the original SchwartzP.py behavior: compute_density_field() with no
     # mode defaults to "band" (renamed from "abs").
     DEFAULT_FIELD_MODE = "band"
 

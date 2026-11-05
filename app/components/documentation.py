@@ -7,10 +7,12 @@ import streamlit as st
 
 """
 #=====================================================================================================================
+0 - (reserved)
 1 - generate_TPMS_doc   -> pages/1_Generate_TPMS.py
-2 - prepare_print_doc   -> pages/2_Prepare_Print.py
-3 - simulation_doc      -> pages/2_Simulation.py
-4 - CT_analysis_doc     -> pages/3_CT_Analysis.py
+2 - prepare_print_doc   -> pages/3_Prepare_Print.py
+3 - simulation_doc      -> pages/4_Simulation.py
+4 - CT_analysis_doc     -> pages/5_CT_Analysis.py
+5 - generate_field_doc  -> pages/2_field_generator.py
 #=====================================================================================================================
 Every function in here has the same shape: a collapsed st.expander holding
 a short walkthrough of that page's pipeline (one column per step), then an
@@ -544,7 +546,9 @@ def CT_analysis_doc():
                 " - The extracted mesh can be saved as `.stl`."
             )
 
-
+# =====================================================================
+# 5) generate_field_doc
+# =====================================================================
 @st.cache_data(show_spinner=False)
 def generate_field_doc() -> None:
     """

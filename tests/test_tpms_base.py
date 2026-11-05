@@ -59,9 +59,9 @@ def _dummy_implicit_field(x, y, z, px, py, pz):
     )
 
 
-def _expected_distance_field(implicit_field, x, y, z, thickness, level=0.0):
+def _expected_distance_field(implicit_field, x, y, z, thickness, level=0.0, binary_output=True):
     """
-    Independent reimplementation of TPMSModel.compute_field(mode="distance"),
+    Independent reimplementation of TPMSModel.compute_density_field(mode="distance"),
     given an already-computed implicit_field array, so the real implementation
     can be checked against it instead of against itself.
     """
@@ -78,10 +78,11 @@ def _expected_distance_field(implicit_field, x, y, z, thickness, level=0.0):
     dist = dist_out + dist_in
 
     half_t = thickness / 2.0
-    mask = dist < half_t
-    v = np.zeros_like(dist) - 1
-    v[mask] = dist[mask]
-    return v
+    if binary_output:
+        # +1 inside the wall band (closer than half_t to the surface), -1 elsewhere
+        return np.where(dist < half_t, 1.0, -1.0)
+    # continuous: positive inside the wall band, 0 on its boundary, negative outside
+    return half_t - dist
 
 
 # ============================================================================
@@ -91,11 +92,11 @@ class TestImplicitFieldIsAbstract:
     """_implicit_field() must be overridden by a subclass; the base class's own version should refuse to run."""
 
     def test_raw_tpmsmodel_raises_not_implemented(self, small_grid):
-        """Instantiating TPMSModel directly (no subclass) is fine, but calling compute_field() must raise NotImplementedError since _implicit_field() was never overridden."""
+        """Instantiating TPMSModel directly (no subclass) is fine, but calling compute_density_field() must raise NotImplementedError since _implicit_field() was never overridden."""
         x, y, z = small_grid
         model = TPMSModel(x, y, z, 1.0, 1.0, 1.0, 0.2)
         with pytest.raises(NotImplementedError):
-            model.compute_field()
+            model.compute_density_field()
 
 
 # ============================================================================
@@ -147,7 +148,7 @@ class TestValidateInputs:
 # ============================================================================
 class TestComputeField:
     """
-    Tests for TPMSModel.compute_field(): mode dispatch (band/signed/
+    Tests for TPMSModel.compute_density_field(): mode dispatch (band/signed/
     signed_inverse/distance/distance_fast/invalid) and the
     "mode=None -> DEFAULT_FIELD_MODE" default lookup. Checked through
     _DummyTPMS's own simple formula; each real surface's formula is
@@ -158,7 +159,7 @@ class TestComputeField:
         """mode="band" should equal thickness - |implicit_field|, per the docstring."""
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.3, 1.1, 0.9, 0.25)
-        v = model.compute_field(mode="band")
+        v = model.compute_density_field(mode="band", binary_output=False)
         expected = 0.25 - np.abs(_dummy_implicit_field(x, y, z, 1.3, 1.1, 0.9))
         np.testing.assert_allclose(v, expected)
         assert model.v is v
@@ -167,29 +168,38 @@ class TestComputeField:
         """mode="signed" should equal implicit_field - level (a plain level-set, no abs()), and should NOT depend on thickness."""
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.3, 1.1, 0.9, 0.25)
-        v = model.compute_field(mode="signed", level=0.4)
+        v = model.compute_density_field(mode="signed", level=0.4, binary_output=False)
         expected = _dummy_implicit_field(x, y, z, 1.3, 1.1, 0.9) - 0.4
         np.testing.assert_allclose(v, expected)
 
         # changing thickness with level fixed must NOT change the result
         model_other_thickness = _DummyTPMS(x, y, z, 1.3, 1.1, 0.9, 999.0)
-        v_other = model_other_thickness.compute_field(mode="signed", level=0.4)
+        v_other = model_other_thickness.compute_density_field(mode="signed", level=0.4, binary_output=False)
         np.testing.assert_allclose(v_other, expected)
 
     def test_signed_inverse_mode_is_complement_of_signed(self, small_grid):
         """mode="signed_inverse" should equal level - implicit_field, i.e. exactly the negation of "signed"'s result at the same level."""
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.3, 1.1, 0.9, 0.25)
-        v_signed = model.compute_field(mode="signed", level=0.4)
-        v_inverse = model.compute_field(mode="signed_inverse", level=0.4)
+        v_signed = model.compute_density_field(mode="signed", level=0.4, binary_output=False)
+        v_inverse = model.compute_density_field(mode="signed_inverse", level=0.4, binary_output=False)
         np.testing.assert_allclose(v_inverse, -v_signed)
 
-    def test_default_mode_uses_default_field_mode_attribute(self, small_grid):
-        """Calling compute_field() with no mode argument should use the subclass's DEFAULT_FIELD_MODE ("band" for _DummyTPMS)."""
+    @pytest.mark.parametrize("mode", ["band", "signed", "signed_inverse"])
+    def test_binary_output_is_sign_of_raw_field(self, small_grid, mode):
+        """binary_output=True (default) should give +1 where the raw field is >= 0 and -1 where it is < 0."""
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.3, 1.1, 0.9, 0.25)
-        v_default = model.compute_field()
-        v_band = model.compute_field(mode="band")
+        raw = model.compute_density_field(mode=mode, level=0.1, binary_output=False).copy()
+        binary = model.compute_density_field(mode=mode, level=0.1)
+        np.testing.assert_array_equal(binary, np.where(raw >= 0, 1.0, -1.0))
+
+    def test_default_mode_uses_default_field_mode_attribute(self, small_grid):
+        """Calling compute_density_field() with no mode argument should use the subclass's DEFAULT_FIELD_MODE ("band" for _DummyTPMS)."""
+        x, y, z = small_grid
+        model = _DummyTPMS(x, y, z, 1.3, 1.1, 0.9, 0.25)
+        v_default = model.compute_density_field()
+        v_band = model.compute_density_field(mode="band")
         np.testing.assert_allclose(v_default, v_band)
 
     def test_invalid_mode_raises(self, small_grid):
@@ -197,7 +207,7 @@ class TestComputeField:
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.0, 1.0, 1.0, 0.2)
         with pytest.raises(ValueError):
-            model.compute_field(mode="bogus")
+            model.compute_density_field(mode="bogus")
 
     def test_distance_mode_matches_formula(self, small_grid):
         """mode="distance" is checked by independently rebuilding the whole distance-transform pipeline (binary split at implicit_field > level -> distance_transform_edt -> threshold at thickness/2) and asserting an exact match."""
@@ -205,10 +215,11 @@ class TestComputeField:
         x, y, z = small_grid
         px, py, pz, thickness = 1.3, 1.1, 0.9, 0.5
         model = _DummyTPMS(x, y, z, px, py, pz, thickness)
-        v = model.compute_field(mode="distance")
         implicit_field = _dummy_implicit_field(x, y, z, px, py, pz)
-        expected = _expected_distance_field(implicit_field, x, y, z, thickness)
-        np.testing.assert_allclose(v, expected)
+        for binary_output in (True, False):
+            v = model.compute_density_field(mode="distance", binary_output=binary_output)
+            expected = _expected_distance_field(implicit_field, x, y, z, thickness, binary_output=binary_output)
+            np.testing.assert_allclose(v, expected)
 
     def test_distance_mode_respects_level(self, small_grid):
         """mode="distance" with a non-zero `level` should place the reference surface at implicit_field == level (not hardcoded at 0) - this is the fix for the bug where `level`/`threshold` was silently ignored."""
@@ -222,22 +233,25 @@ class TestComputeField:
         # negative rather than a real assertion about the fix.
         px, py, pz, thickness = 1.3, 1.1, 0.9, 2.0
         model = _DummyTPMS(x, y, z, px, py, pz, thickness)
-        v = model.compute_field(mode="distance", level=0.3)
+        # continuous output: with thickness=2.0 the binary output is +1 everywhere for both levels
+        v = model.compute_density_field(mode="distance", level=0.3, binary_output=False)
         implicit_field = _dummy_implicit_field(x, y, z, px, py, pz)
-        expected = _expected_distance_field(implicit_field, x, y, z, thickness, level=0.3)
+        expected = _expected_distance_field(implicit_field, x, y, z, thickness, level=0.3, binary_output=False)
         np.testing.assert_allclose(v, expected)
         # sanity check: level=0.3 must actually produce a different field than level=0.0
-        v_default_level = model.compute_field(mode="distance", level=0.0)
+        v_default_level = model.compute_density_field(mode="distance", level=0.0, binary_output=False)
         assert not np.allclose(v, v_default_level)
 
     def test_distance_fast_mode_produces_expected_range(self, small_grid):
-        """mode="distance_fast" (taxicab approximation) should still produce values that are either exactly -1 (outside the wall band) or a distance within [0, thickness/2] (inside it)."""
+        """mode="distance_fast" (taxicab approximation): binary output is only +1 / -1; continuous output is half_t - distance, so never above thickness/2."""
         x, y, z = small_grid
         thickness = 0.5
         model = _DummyTPMS(x, y, z, 1.3, 1.1, 0.9, thickness)
-        v = model.compute_field(mode="distance_fast")
+        v = model.compute_density_field(mode="distance_fast")
         assert v.shape == x.shape
-        assert np.all((v == -1) | ((v >= 0) & (v <= thickness / 2.0 + 1e-9)))
+        assert np.all(np.isin(v, (-1.0, 1.0)))
+        v_continuous = model.compute_density_field(mode="distance_fast", binary_output=False)
+        assert np.all(v_continuous <= thickness / 2.0 + 1e-9)
 
 
 # ============================================================================
@@ -250,14 +264,14 @@ class TestGuardedMethodsRequireField:
     """
 
     def test_generate_mesh_without_field_returns_none(self, small_grid):
-        """generate_mesh() before compute_field() should return (None, None), per its documented early-exit behavior, not raise."""
+        """generate_mesh() before compute_density_field() should return (None, None), per its documented early-exit behavior, not raise."""
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.0, 1.0, 1.0, 0.2)
         verts, faces = model.generate_mesh()
         assert verts is None and faces is None
 
     def test_save_without_field_raises(self, tmp_path, small_grid):
-        """save() needs self.v; calling it before compute_field() should raise RuntimeError rather than write a garbage file."""
+        """save() needs self.v; calling it before compute_density_field() should raise RuntimeError rather than write a garbage file."""
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.0, 1.0, 1.0, 0.2)
         with pytest.raises(RuntimeError):
@@ -278,7 +292,7 @@ class TestGuardedMethodsRequireField:
             model.fix_mesh()
 
     def test_add_baseplates_without_field_raises(self, small_grid):
-        """add_baseplates() needs self.v; calling it before compute_field() should raise RuntimeError."""
+        """add_baseplates() needs self.v; calling it before compute_density_field() should raise RuntimeError."""
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.0, 1.0, 1.0, 0.2)
         with pytest.raises(RuntimeError):
@@ -299,7 +313,7 @@ class TestAddBaseplates:
         """A thickness worth exactly 3 slices should set exactly the first and last 3 z-slices to 1, and nothing else."""
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.0, 1.0, 1.0, 0.2)
-        model.compute_field(mode="band")
+        model.compute_density_field(mode="band")
 
         dz = abs(z[0, 0, 1] - z[0, 0, 0])
         thickness = 3 * dz  # exactly 3 slices worth
@@ -313,7 +327,7 @@ class TestAddBaseplates:
         """thickness=0.0 (below one voxel of spacing) should leave the field completely untouched, per the documented early-return."""
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.0, 1.0, 1.0, 0.2)
-        model.compute_field(mode="band")
+        model.compute_density_field(mode="band")
         before = model.v.copy()
         model.add_baseplates(thickness=0.0)
         np.testing.assert_array_equal(model.v, before)
@@ -322,6 +336,6 @@ class TestAddBaseplates:
         """A thickness far larger than the grid's z-extent should clamp to filling the entire volume with 1, not raise or index out of bounds."""
         x, y, z = small_grid
         model = _DummyTPMS(x, y, z, 1.0, 1.0, 1.0, 0.2)
-        model.compute_field(mode="band")
+        model.compute_density_field(mode="band")
         model.add_baseplates(thickness=1000.0)
         assert np.all(model.v == 1)

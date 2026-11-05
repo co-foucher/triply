@@ -2,13 +2,13 @@
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
 
-import numpy as np
-
-# Use relative imports so this module works when used as a package
-from .tpms_base import TPMSModel, create_a_tpms
-
-
 """
+============================================================================
+TPMS_FISCHERKOCHS
+Fischer-Koch S TPMS type (FischerKochSModel) and its
+create_a_fischer_koch_s() pipeline.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
 1 - FischerKochSModel (class)
@@ -26,8 +26,13 @@ S's implicit surface equation.
 USE EXAMPLE
 -----------
 >>> model = FischerKochSModel(x, y, z, px, py, pz, thickness)
->>> field = model.compute_field()
+>>> field = model.compute_density_field()
 """
+
+import numpy as np
+
+# Use relative imports so this module works when used as a package
+from .tpms_base import TPMSModel, create_a_tpms
 
 
 # =====================================================================
@@ -68,11 +73,11 @@ class FischerKochSModel(TPMSModel):
     EXAMPLE
     -------
     >>> model = FischerKochSModel(x, y, z, px, py, pz, thickness)
-    >>> field = model.compute_field()
+    >>> field = model.compute_density_field()
     >>> model = FischerKochSModel.load("gyroid_data.npz")
     """
 
-    # Same convention as GyroidModel: compute_field() with no mode defaults
+    # Same convention as GyroidModel: compute_density_field() with no mode defaults
     # to "distance".
     DEFAULT_FIELD_MODE = "distance"
 
@@ -176,7 +181,7 @@ def create_a_fischer_koch_s(x: np.ndarray,
         Target fraction of faces to keep during simplification (0.5 = keep
         50% of faces), or target number of faces if >1 (e.g. 10000). Default = 0.9.
     field_mode : str, optional
-        Field computation mode passed to FischerKochSModel.compute_field
+        Field computation mode passed to FischerKochSModel.compute_density_field
         (default = "distance").
 
     RETURNS

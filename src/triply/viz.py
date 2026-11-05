@@ -1,24 +1,33 @@
 # triply: design, meshing, simulation and CT analysis of TPMS structures
 # Copyright (C) 2026, Empa, Laboratory for High Performance Ceramics (201), Corentin Foucher
 # SPDX-License-Identifier: MIT
-import numpy as np
-import plotly.graph_objects as go
-from .logger import logger
-from plotly.colors import sample_colorscale
-
 
 """
+============================================================================
+VIZ
+Plotly visualizations: interactive mesh previews, histograms, and 2D slice
+views of 3D fields.
+============================================================================
+
 #=====================================================================================================================
 0 - (reserved)
-1 - save_mesh_as_html
+1a - _build_mesh_figure   (helper shared by 1b and 1c)
+1b - build_mesh_figure    (returns the Plotly figure)
+1c - save_mesh_as_html    (writes it to an .html file)
 2 - plot_histogram
 3 - twod_view_of_matrix
 4 - view_mesh
 #=====================================================================================================================
 """
 
+import numpy as np
+import plotly.graph_objects as go
+from .logger import logger
+from plotly.colors import sample_colorscale
+
+
 # =====================================================================
-# 1) _build_mesh_figure / build_mesh_figure / save_mesh_as_html
+# 1a) _build_mesh_figure
 # =====================================================================
 def _build_mesh_figure(faces: np.ndarray,
                        verts: np.ndarray,
@@ -27,13 +36,49 @@ def _build_mesh_figure(faces: np.ndarray,
                        show_random_colorscale: bool = False,
                        show_curvature_colorscale: bool = False):
     """
-    Shared core of build_mesh_figure()/save_mesh_as_html(): validates
-    faces/verts, resolves the show_*_colorscale flag precedence, reduces
-    faces if needed, computes facecolor, and returns the Mesh3d go.Figure.
-    No file I/O and no fig.show()/fig.write_html() here - callers decide
-    what to do with the returned figure. See save_mesh_as_html()'s
-    docstring for parameter/exception details; this raises the same
-    TypeError/ValueError/RuntimeError, at the same points.
+    ============================================================================
+    1a) _BUILD_MESH_FIGURE
+    Shared core of build_mesh_figure() / save_mesh_as_html(): validates
+    faces/verts, resolves the colour-scale flags, reduces the number of faces
+    if needed, computes one colour per face, and returns the Mesh3d figure.
+    No file I/O and no fig.show() here - callers decide what to do with it.
+    ============================================================================
+
+    PARAMETERS
+    ----------
+    faces : (M, 3) ndarray
+        Triangle indices.
+    verts : (N, 3) ndarray
+        Vertex coordinates.
+    show_normal_colorscale : bool, optional
+        Colour each face by its unit normal n:
+        RGB = ((n_x + 1) / 2, (n_y + 1) / 2, (n_z + 1) / 2) * 255.
+    show_flat_colorscale : bool, optional
+        One colour ("lightblue") for every face.
+    show_random_colorscale : bool, optional
+        A random RGB colour per face.
+    show_curvature_colorscale : bool, optional
+        Colour by a proxy for local surface variation. 
+        
+    RETURNS
+    -------
+    fig : plotly.graph_objects.Figure
+        Mesh3d figure, axes visible, aspectmode="data".
+
+    RAISES
+    ------
+    TypeError
+        If faces or verts is None.
+    ValueError
+        If faces is empty.
+    RuntimeError
+        If the colours or the figure fail to build.
+
+    NOTES
+    -----
+    - Above 5,000,000 faces, only the 5,000,000 faces whose centroid is
+      closest to the coordinate origin are kept (not a uniform thinning).
+      If this reduction fails, the error is logged and all faces are kept.
     """
     # ----------------------------------------------
     # Validate input
@@ -245,6 +290,9 @@ def _build_mesh_figure(faces: np.ndarray,
     return fig
 
 
+# =====================================================================
+# 1b) build_mesh_figure
+# =====================================================================
 def build_mesh_figure(faces: np.ndarray,
                       verts: np.ndarray,
                       show_normal_colorscale: bool = False,
@@ -253,7 +301,7 @@ def build_mesh_figure(faces: np.ndarray,
                       show_curvature_colorscale: bool = False):
     """
     ============================================================================
-    BUILD_MESH_FIGURE
+    1b) BUILD_MESH_FIGURE
     Builds the same Mesh3d go.Figure as save_mesh_as_html(), without ever
     touching disk. For callers that embed the figure directly (e.g.
     Streamlit's st.plotly_chart) - going through save_mesh_as_html() +
@@ -283,6 +331,9 @@ def build_mesh_figure(faces: np.ndarray,
                               show_random_colorscale, show_curvature_colorscale)
 
 
+# =====================================================================
+# 1c) save_mesh_as_html
+# =====================================================================
 def save_mesh_as_html(faces: np.ndarray,
                       verts: np.ndarray,
                       file_name: str,
@@ -293,9 +344,9 @@ def save_mesh_as_html(faces: np.ndarray,
                       save: bool = True):
     """
     ============================================================================
-    1) SAVE_MESH_AS_HTML
+    1c) SAVE_MESH_AS_HTML
     Converts a mesh into a lightweight Plotly 3D HTML visualization.
-    Handles face/edge reduction for performance.
+    Above 5,000,000 faces, the mesh is reduced first (see _build_mesh_figure).
     ============================================================================
 
     PARAMETERS
@@ -307,15 +358,15 @@ def save_mesh_as_html(faces: np.ndarray,
     file_name : str
         Output HTML file name (without extension).
     show_normal_colorscale : bool
-        If True, colors faces based on normal vectors.
+        If True, colors faces by their normal vector (see _build_mesh_figure).
     show_flat_colorscale : bool
         If True, colors faces with a flat color.
     show_random_colorscale : bool
         If True, colors faces with random colors.
     show_curvature_colorscale : bool
-        If True, colors faces based on curvature (not implemented).
+        If True, colors faces by local surface variation (see _build_mesh_figure).
     save : bool
-        If True, saves the HTML file. If False, displays the figure without saving.
+        If True, saves the HTML file. If False, shows it with fig.show() instead of saving.
 
     RETURNS
     -------
@@ -373,9 +424,9 @@ def save_mesh_as_html(faces: np.ndarray,
         logger.info("HTML visualization displayed (not saved).")
 
 
-#=====================================================================
-#2) plot_histogram
-#=====================================================================
+# =====================================================================
+# 2) plot_histogram
+# =====================================================================
 def plot_histogram(face_areas, BINS=1000):
     """
     ============================================================================
@@ -448,9 +499,9 @@ def plot_histogram(face_areas, BINS=1000):
         logger.error(f"Failed to display histogram: {e}", exc_info=True)
 
 
-#=====================================================================
-#3) twod_view_of_matrix
-#=====================================================================
+# =====================================================================
+# 3) twod_view_of_matrix
+# =====================================================================
 
 def twod_view_of_matrix(v: np.ndarray,
                         x: np.ndarray = None,
