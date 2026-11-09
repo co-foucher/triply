@@ -42,31 +42,23 @@ def _build_mesh_figure(_faces, verts, selected_flag: str):
     """
     ============================================================================
     1) _BUILD_MESH_FIGURE
-    Pure, cacheable half of render_mesh_preview: builds the Mesh3d figure
-    for one specific color mode. Deliberately free of any st.* calls -
-    only the returned figure is memoized, no widget/UI side effect rides
-    along with the cache (widgets aren't supported inside cache_data-
-    decorated functions - see the write-up in project memory / chat
-    history for why the original all-in-one version didn't actually work).
+    Builds the Mesh3d figure of a mesh for one colour mode, with
+    viz.build_mesh_figure. Cached (st.cache_data, last 8 figures).
     ============================================================================
 
     PARAMETERS
     ----------
-    faces, verts : ndarray
-        Mesh data (as produced by TPMSModel.generate_mesh()).
+    _faces : (M, 3) ndarray
+        Triangle indices. Not part of the cache key (leading "_").
+    verts : (N, 3) ndarray
+        Vertex coordinates.
     selected_flag : str
-        One of _COLORSCALE_FLAGS's values (e.g. "show_normal_colorscale"),
-        naming which build_mesh_figure() boolean flag to set True.
+        Name of the build_mesh_figure flag to set True, one of the values of
+        _COLORSCALE_FLAGS (e.g. "show_normal_colorscale").
 
     RETURNS
     -------
     fig : plotly.graph_objects.Figure
-        The Mesh3d figure for the selected color mode.
-
-    NOTES
-    -----
-    max_entries=8 rather than 1 because a handful of distinct (mesh, colorscale) 
-    combos shouldn't evict each other on every call.
     """
     flags = {flag: (flag == selected_flag) for flag in _COLORSCALE_FLAGS.values()}
     return viz.build_mesh_figure(_faces, verts, **flags)

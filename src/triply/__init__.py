@@ -60,6 +60,7 @@ _LAZY_SUBMODULES = {
     "CT_scans": ".CT_scans",
     "CT_visualization_window": ".CT_visualization_window",
     "voxel_tools": ".voxel_tools",
+    "tpms_characterisation": ".tpms_characterisation",
     "utils": ".utils",
     "config": ".config",
     "TPMS_classes": ".TPMS_classes",
@@ -103,6 +104,7 @@ def __dir__():
 #__all__ is a list that defines what gets exported when someone does from package import *.
 __all__ = [
     "mesh_tools",
+    "tpms_characterisation",
     "viz",
     "io_ops",
     "abaqus_tools",
