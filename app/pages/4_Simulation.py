@@ -151,12 +151,14 @@ BUILTIN_SIM_INFO = {
         "stiffness in one direction.\n\n"
         "The two extreme faces along the chosen axis are found automatically "
         "(the slab of nodes within the tolerance below of the bounding-box "
-        "min/max). The bottom face is held **only** along the load axis - a "
-        "roller, so the structure stays free to expand sideways and you get the "
-        "lattice's own stiffness rather than a platen-confined one. Two single "
-        "nodes on that face are pinned in-plane to remove the leftover "
-        "rigid-body motion. The total load you enter is then split equally over "
-        "every node of the top face."
+        "min/max). Each face is tied to a reference point (RP-Bottom, RP-Top) "
+        "by a kinematic coupling on the axial translation and the rotations "
+        "only: both faces stay flat but can still expand sideways, so there is "
+        "no platen confinement. RP-Bottom is fully fixed; RP-Top can only move "
+        "along the axis and carries the total load you enter. Two single nodes "
+        "on the bottom face are pinned in-plane to remove the remaining "
+        "rigid-body motion.\n\n"
+        "Stiffness = reaction force on RP-Bottom / displacement of RP-Top."
     ),
 }
 # simulation types that take a load case on top of the material properties
@@ -178,6 +180,7 @@ if mesh_source == "Existing .inp file":
                 filetypes=[("inp files", "*.inp")],
                 small_ui=False)
     mesh_path = st.session_state.get("imported_mesh_path")
+    st.warning("For the static simulation, you still need to select the stl file above... I use it to estimate the positions of the two pins.")
 else:
     # fTetWild writes <mesh_output_name>.inp next to the STL (see TET_mesh_tools.mesh_an_STL)
     mesh_path = f"{stl_dir}/{mesh_output_name}.inp" if stl_dir and mesh_output_name else None
@@ -246,10 +249,10 @@ def create_simulation_section():
             if rbm_coord is not None:
                 temp = [str(x) for x in rbm_coord[0,:]]
                 st.session_state["sim_config"]["load_case"]["pin_a_coords"] = temp
-                st.warning(f"Pin A coordinates: {temp}")
+                st.info(f"Pin A coordinates: {temp}")
                 temp = [str(x) for x in rbm_coord[1,:]]
                 st.session_state["sim_config"]["load_case"]["pin_b_coords"] = temp
-                st.warning(f"Pin B coordinates: {temp}")
+                st.info(f"Pin B coordinates: {temp}")
 
 @st.fragment
 def render_create_abaqus_section(mesh_dir: str, mesh_name: str) -> None:
@@ -362,8 +365,11 @@ def render_run_abaqus_section(mesh_dir: str, mesh_name: str) -> None:
                                     f"run:{sim_name}",
                                     run_abaqus_job,
                                     file_name=sim_name,
+                                    cpus=CPU_CORES,
                                     sim_dir=sim_dir)
                 st.session_state["run_job_id"] = job_id
+                # run_abaqus_job solves in sim_dir/run - section 4 reads the .odb from here
+                st.session_state["run_odb_path"] = f"{sim_dir}/run/Job-{sim_name}.odb"
 
 render_run_abaqus_section(mesh_dir, mesh_name)
 render_job_status(st.session_state["jobs"], "run_job_id")
@@ -377,67 +383,83 @@ st.divider()
 st.subheader("4. Extract results from ODB")
 
 @st.fragment
-def render_extract_results_section(mesh_dir: str, mesh_name: str) -> None:
-    # if the user hasn't selected a mesh, show an error
-    if "static" in st.session_state["sim_config"]["script_name"]:
-        if not mesh_dir or not mesh_name:
-            st.error("Please select a mesh first.")
-        if not st.session_state.get("sim_output_dir"):
-            st.error("Simulation output directory not found. Please run the simulation first.")
-        else:
-            # ask user which field output to extract, and where to save it
-            #field_name = st.selectbox("Select the field output to extract", ["U.Magnitude","U.U1", "U.U2", "U.U3"], index=0)
-            FIELD_NAMES = ["U.Magnitude", "U.U1", "U.U2", "U.U3"]
-            # Fixed per-field color (categorical palette, adjacent-pairlist order) so
-            # a given field always gets the same hue, regardless of which fields end
-            # up succeeding below.
-            FIELD_COLORS = {
-                "U.Magnitude": "#2a78d6",  # blue
-                "U.U1": "#eb6834",         # orange
-                "U.U2": "#1baf7a",         # aqua
-                "U.U3": "#eda100",         # yellow
-            }
-            if st.button("Extract results"):
-                nset_name = "SET-TOP"  # hard-coded in the ABAQUS simulation script
-                # One shared figure: every field's boxplot becomes its own row on a
-                # common value axis, so distributions are directly comparable.
-                fig = go.Figure()
-                for field_name in FIELD_NAMES:
-                    # grab the simulation output folder from the session state, which was set by the create_simulation_section() function above.
-                    sim_output_dir = st.session_state["sim_output_dir"]
-                    # the job (and so the ODB) is named after the output name <mesh_name>-<kind> set in section 2
-                    output_name = st.session_state["sim_config"]["output_name"]
-                    odb_path = sim_output_dir / f"run\\Job-{output_name}.odb"
-                    # the extracted values go to a CSV named after the same output name
-                    out_path = sim_output_dir / f"run\\{output_name}_stress.csv"
-                    success = abaqus_tools.extract_field_at_nodeset(str(odb_path), nset_name, field_name, str(out_path))
-                    if success:
-                        # ------ read the extracted values back and add them as a row in the shared boxplot ------
-                        try:
-                            results_df = pd.read_csv(out_path)
-                        except Exception as e:
-                            st.error(f"Could not read extracted results from {out_path}: {e}")
-                        else:
-                            fig.add_trace(go.Box(
-                                x=results_df["value"], name=field_name, boxpoints="outliers",
-                                orientation="h", marker_color=FIELD_COLORS[field_name],
-                            ))
-                    else:
-                        st.error("Failed to extract results.")
+def render_extract_results_section() -> None:
+    # ------ choose which ODB to read ------
+    odb_source = st.segmented_control(
+        label="Results to read",
+        options=["Results from step 3", "Existing .odb file"],
+        default="Results from step 3",
+        key="odb_source")
 
-                if fig.data:
-                    fig.update_layout(
-                        title=f"Field output distributions at node set '{nset_name}'",
-                        xaxis_title="Value",
-                        # Each row is already direct-labeled by field name, so a
-                        # legend duplicating those labels would be redundant.
-                        showlegend=False,
-                    )
-                    st.plotly_chart(fig)
+    if odb_source == "Existing .odb file":
+        # browse_file() returns None - it writes the chosen path into st.session_state[key]
+        browse_file(key="imported_odb_path",
+                    title="Select a simulation result (Job-<name>.odb)",
+                    filetypes=[("ABAQUS results", "*.odb")],
+                    small_ui=False)
+        odb_path = st.session_state.get("imported_odb_path")
     else:
-        st.error(f"No export defined for this simulation type: {st.session_state['sim_config']['load_case']}. Please run a simulation with a load case first.")
+        # set by section 3 when a run is started
+        odb_path = st.session_state.get("run_odb_path")
 
-if st.session_state.get("sim_output_dir") is not None or True:
-    render_extract_results_section(mesh_dir, mesh_name)
-else:
-    st.info("Run a simulation first to extract results from the ODB file.")
+    if not odb_path:
+        st.info("Run a simulation in step 3, or select an existing .odb file.")
+        return
+    if not Path(odb_path).is_file():
+        st.info(f"{odb_path} not found. If it comes from step 3, wait for the run to finish.")
+        return
+
+    #   odb_dir  : folder holding the .odb - the extracted CSVs are written next to it
+    #   odb_name : file name without extension and without "Job-", e.g. "my_tpms-static"
+    odb_dir = Path(odb_path).parent
+    odb_name = Path(odb_path).stem.removeprefix("Job-")
+
+    # the SET-TOP node set read below only exists in the static script
+    if odb_name.endswith("-" + BUILTIN_SIM_SUFFIX["Frequency analysis"]):
+        st.info(f"No result extraction defined yet for frequency analyses ({odb_name}).")
+        return
+
+    FIELD_NAMES = ["U.Magnitude", "U.U1", "U.U2", "U.U3"]
+    # Fixed per-field color (categorical palette, adjacent-pairlist order) so
+    # a given field always gets the same hue, regardless of which fields end
+    # up succeeding below.
+    FIELD_COLORS = {
+        "U.Magnitude": "#2a78d6",  # blue
+        "U.U1": "#eb6834",         # orange
+        "U.U2": "#1baf7a",         # aqua
+        "U.U3": "#eda100",         # yellow
+    }
+    if st.button("Extract results"):
+        nset_name = "SET-TOP"  # hard-coded in the ABAQUS simulation script
+        # One shared figure: every field's boxplot becomes its own row on a
+        # common value axis, so distributions are directly comparable.
+        fig = go.Figure()
+        for field_name in FIELD_NAMES:
+            # one CSV per field, e.g. my_tpms-static_U.U1.csv
+            out_path = odb_dir / f"{odb_name}_{field_name}.csv"
+            success = abaqus_tools.extract_field_at_nodeset(str(odb_path), nset_name, field_name, str(out_path))
+            if success:
+                # ------ read the extracted values back and add them as a row in the shared boxplot ------
+                try:
+                    results_df = pd.read_csv(out_path)
+                except Exception as e:
+                    st.error(f"Could not read extracted results from {out_path}: {e}")
+                else:
+                    fig.add_trace(go.Box(
+                        x=results_df["value"], name=field_name, boxpoints="outliers",
+                        orientation="h", marker_color=FIELD_COLORS[field_name],
+                    ))
+            else:
+                st.error(f"Failed to extract {field_name} from {Path(odb_path).name}.")
+
+        if fig.data:
+            fig.update_layout(
+                title=f"Field output distributions at node set '{nset_name}'",
+                xaxis_title="Value",
+                # Each row is already direct-labeled by field name, so a
+                # legend duplicating those labels would be redundant.
+                showlegend=False,
+            )
+            st.plotly_chart(fig)
+
+render_extract_results_section()

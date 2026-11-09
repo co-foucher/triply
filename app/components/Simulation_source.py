@@ -261,6 +261,7 @@ def _clear_previous_job_files(run_dir: Path, file_name: str, log: Callable[[str]
 def run_abaqus_job(log: Callable[[str], None],
                 file_name: str,
                 sim_dir: str,
+                cpus: int = 1,
                 max_wait_time: int = 600):
     """
     ============================================================================
@@ -287,6 +288,8 @@ def run_abaqus_job(log: Callable[[str], None],
         Job name without the "Job-" prefix: the input is Job-<file_name>.inp.
     sim_dir : str
         Folder holding Job-<file_name>.inp (written by create_abaqus_job).
+    cpus : int, optional
+        Number of CPU cores to use for the ABAQUS solve. Default = 1.
     max_wait_time : int, optional
         Max seconds to wait, applied separately to the "job started" wait
         and to the "job completed" wait. Default = 600.
@@ -314,6 +317,7 @@ def run_abaqus_job(log: Callable[[str], None],
         input_path=str(sim_dir),
         output_path=str(run_dir),
         file_name=file_name,
+        cpus=cpus,
         max_wait_time=max_wait_time,
     )
     if not started:

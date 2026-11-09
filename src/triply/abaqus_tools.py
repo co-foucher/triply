@@ -206,6 +206,7 @@ def create_simulation(input_path:str,
 def run_simulation(input_path,
                    output_path,
                    file_name,
+                   cpus=1,
                    max_wait_time=600) -> bool:
     """
     ============================================================================
@@ -225,6 +226,8 @@ def run_simulation(input_path,
         files will be written.
     file_name : str
         Base name used to locate the input INP file and name the output files.
+    cpus : int, optional
+        Number of CPU cores to use for the ABAQUS solve (default = 1).
     max_wait_time : int, optional
         Maximum time to wait for the simulation to start, in seconds
         (default = 600).
@@ -243,7 +246,7 @@ def run_simulation(input_path,
         return False
 
     # --- run abaqus headless from that folder ---
-    cmd = ["abaqus", "job=Job-" + file_name]
+    cmd = ["abaqus", "cpus=" + str(cpus), "job=Job-" + file_name]
     try:
         subprocess.run(cmd, check=True, cwd=str(output_path), shell=True)
     except Exception as e:

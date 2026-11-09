@@ -18,6 +18,7 @@
 *.csv
 *.sta
 *.msg
+*.rec
 
 # now folders
 # environments & caches
@@ -28,6 +29,7 @@ venv/
 .mypy_cache/
 .ipynb_checkpoints/
 ./gui_outputs
+gui_outputs/
 
 # packaging artifacts
 *.egg-info/
